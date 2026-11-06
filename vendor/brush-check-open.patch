@@ -1,0 +1,77 @@
+diff --git a/brush-core/src/extensions.rs b/brush-core/src/extensions.rs
+index db008dd..acdbb60 100644
+--- a/brush-core/src/extensions.rs
++++ b/brush-core/src/extensions.rs
+@@ -117,6 +117,18 @@ pub trait ProcessLauncher: Clone + Default + Send + Sync + 'static {
+         let _ = request;
+         std::io::ErrorKind::Unsupported.into()
+     }
++
++    /// Checks whether the shell may open a file for a redirection or `source`.
++    /// SPIKE: proposed hook; by default every open is allowed.
++    ///
++    /// # Arguments
++    ///
++    /// * `path` - Absolute path of the file to open.
++    /// * `write` - Whether the file is opened for writing.
++    fn check_open(&self, path: &std::path::Path, write: bool) -> Result<(), std::io::Error> {
++        let _ = (path, write);
++        Ok(())
++    }
+ }
+ 
+ /// Default process launcher implementation: launches native processes, where
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 56d5183..163b80f 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -1835,8 +1835,16 @@ pub(crate) async fn setup_redirect(
+ 
+                     let fd_num = specified_fd_num.unwrap_or(default_fd_if_unspecified);
+ 
+-                    let opened_file = shell
+-                        .open_file(&options, &expanded_file_path, params)
++                    let opened_file = extensions::ProcessLauncher::check_open(
++                            shell.process_launcher(),
++                            &expanded_file_path,
++                            !matches!(
++                                kind,
++                                ast::IoFileRedirectKind::Read
++                                    | ast::IoFileRedirectKind::DuplicateInput
++                            ),
++                        )
++                        .and_then(|()| shell.open_file(&options, &expanded_file_path, params))
+                         .map_err(|err| {
+                             error::ErrorKind::RedirectionFailure(
+                                 expanded_file_path.to_string_lossy().to_string(),
+@@ -2004,8 +2012,9 @@ fn setup_redirect_output_and_error_to(
+         .truncate(!append)
+         .append(append);
+ 
+-    let stdout_file = shell
+-        .open_file(&file_options, &abs_file_path, params)
++    let stdout_file =
++        extensions::ProcessLauncher::check_open(shell.process_launcher(), &abs_file_path, true)
++        .and_then(|()| shell.open_file(&file_options, &abs_file_path, params))
+         .map_err(|err| {
+             error::ErrorKind::RedirectionFailure(
+                 abs_file_path.to_string_lossy().to_string(),
+diff --git a/brush-core/src/shell/execution.rs b/brush-core/src/shell/execution.rs
+index 3fe0154..fc24ca8 100644
+--- a/brush-core/src/shell/execution.rs
++++ b/brush-core/src/shell/execution.rs
+@@ -121,8 +121,12 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         let mut options = std::fs::File::options();
+         options.read(true);
+ 
+-        let opened_file: openfiles::OpenFile = self
+-            .open_file(&options, path, params)
++        let opened_file: openfiles::OpenFile = crate::extensions::ProcessLauncher::check_open(
++            &self.process_launcher,
++            &self.absolute_path(path),
++            false,
++        )
++            .and_then(|()| self.open_file(&options, path, params))
+             .map_err(|e| error::ErrorKind::FailedSourcingFile(path.to_owned(), e))?;
+ 
+         if opened_file.is_dir() {

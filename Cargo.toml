@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+exclude = ["vendor"]
 
 [workspace.package]
 edition = "2024"
@@ -24,6 +25,9 @@ fs-err = "3.3.2"
 serde_path_to_error = "0.1.20"
 # brush is pinned to one commit for parser and engine, so P2 and P3 share one AST.
 brush-parser = { git = "https://github.com/reubeno/brush", rev = "b2f7782cc941d8c7777940aef1a046986c45c0c3" }
+brush-core = { git = "https://github.com/reubeno/brush", rev = "b2f7782cc941d8c7777940aef1a046986c45c0c3" }
+brush-builtins = { git = "https://github.com/reubeno/brush", rev = "b2f7782cc941d8c7777940aef1a046986c45c0c3" }
+tokio = { version = "1.52", features = ["rt", "macros"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -33,3 +37,7 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
 missing_errors_doc = "allow"
+
+# brush-core carries the check_open patch until it lands upstream.
+[patch."https://github.com/reubeno/brush"]
+brush-core = { path = "vendor/brush-core" }
