@@ -6,7 +6,7 @@
 |---|---|
 | `rust-runner-design.md` | **Design and execution plan**: architecture, policy model, decisions, phases P0-P7 |
 | `rust-runner-spike-results.md` | P0 spike results: hook coverage, corpus compatibility, latency |
-| `rust-shell-spike.html` | Early research summary (OS sandbox sections are superseded by the design doc) |
+| `rust-shell-spike.html` | Visual summary of the final design (published artifact) |
 
 The TS repo is at `~/dev/safesh`. Port sources live there under `src/core`, `src/hooks` and `hooks/`.
 
