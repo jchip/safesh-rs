@@ -146,12 +146,18 @@ impl LocalConfig {
                 )),
             }
         }
-        if run.is_empty() {
+        // Path grants from `retry-path` "always". TS wrote but never loaded them.
+        let local = self.permissions.clone().unwrap_or_default();
+        let non_empty = |v: Option<Vec<String>>| v.filter(|v| !v.is_empty());
+        let (read, write) = (non_empty(local.read), non_empty(local.write));
+        if run.is_empty() && read.is_none() && write.is_none() {
             return (None, warnings);
         }
         let config = Config {
             permissions: Some(PermissionsConfig {
-                run: Some(run),
+                run: (!run.is_empty()).then_some(run),
+                read,
+                write,
                 ..PermissionsConfig::default()
             }),
             ..Config::default()

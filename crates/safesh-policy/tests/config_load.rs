@@ -273,3 +273,17 @@ fn ts_config_with_json_beside_does_not_warn() {
     let out = load_config(t.path(), None, &env).unwrap();
     assert!(!out.warnings.iter().any(|w| w.contains("migrate-config")));
 }
+
+#[test]
+fn local_json_path_grants_are_loaded() {
+    let t = TempDir::new().unwrap();
+    let env = host(t.path());
+    write(
+        &get_local_json_config_path(t.path()),
+        r#"{"permissions":{"read":["/data/in"],"write":["/data/out"]}}"#,
+    );
+    let config = load_config(t.path(), None, &env).unwrap().config;
+    let perms = config.permissions.unwrap();
+    assert!(perms.read.unwrap().contains(&"/data/in".to_string()));
+    assert!(perms.write.unwrap().contains(&"/data/out".to_string()));
+}
