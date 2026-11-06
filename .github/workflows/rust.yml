@@ -1,25 +1,76 @@
-name: rust
+name: ci
 
 on:
   push:
-    paths: ["crates/**", "Cargo.toml", "Cargo.lock", ".github/workflows/rust.yml"]
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "vendor/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust.yml"
   pull_request:
-    paths: ["crates/**", "Cargo.toml", "Cargo.lock", ".github/workflows/rust.yml"]
+    paths:
+      - "crates/**"
+      - "vendor/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  lint:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Bash version
-        if: matrix.os == 'ubuntu-latest'
-        run: bash --version
+      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runner: macos-15
+          - name: linux-x86_64
+            runner: ubuntu-24.04
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+      - name: Toolchain and bash versions
+        run: |
+          uname -a
+          rustc --version
+          bash --version | head -1
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --locked -p safesh-cli
+      - name: Smoke test the binary
+        run: |
+          ./target/release/safesh --version
+          ./target/release/safesh check 'ls | wc -l' | tail -1 | grep -q 'decision: allow'
+      - name: Package
+        run: tar -czf "safesh-${{ matrix.name }}.tar.gz" -C target/release safesh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safesh-${{ matrix.name }}
+          path: safesh-${{ matrix.name }}.tar.gz
+          if-no-files-found: error
