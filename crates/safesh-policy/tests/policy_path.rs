@@ -313,3 +313,37 @@ fn device_paths_need_no_grant() {
     }
     assert_ask(&write_access(&p, Path::new("/dev/disk0"), &cwd));
 }
+
+#[test]
+fn policy_files_are_not_writable_through_the_shell() {
+    // Session grants, project config and safesh state hold grants; writing them would let
+    // an agent grant itself access.
+    let f = fx();
+    let proj = f.root.join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    let p = policy(&cfg(&proj), &proj, &f.host);
+    for target in [
+        proj.join(".config/safesh/config.local.json"),
+        proj.join(".config/safesh/config.json"),
+        proj.join(".temp/safesh/session-s1.json"),
+        f.host.state_dir.join("pending/pending-1-2.json"),
+        f.host.home.join(".config/safesh/config.json"),
+    ] {
+        assert_denied(&write_access(&p, &target, &proj));
+        if target.starts_with(&proj) {
+            assert!(
+                read(&p, &target, &proj).is_allow(),
+                "read {}",
+                target.display()
+            );
+        }
+    }
+    // Neighbors stay writable.
+    for ok in [
+        proj.join(".temp/other.txt"),
+        proj.join(".config/tool.json"),
+        proj.join("src/a.rs"),
+    ] {
+        assert!(write_access(&p, &ok, &proj).is_allow(), "{}", ok.display());
+    }
+}

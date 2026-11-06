@@ -103,8 +103,11 @@ impl Drop for Fixture {
 fn fixture(tag: &str) -> Fixture {
     let uid = rustix::process::getuid().as_raw();
     let root = PathBuf::from(format!("/tmp/claude-{uid}"));
-    if !root.exists() {
-        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+    // Tests run in parallel, so another test may create it between check and create.
+    match fs::DirBuilder::new().mode(0o700).create(&root) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => panic!("{}: {e}", root.display()),
     }
     let sid = format!("safesh-test-{tag}-{}", std::process::id());
     let proj = root.join(&sid);

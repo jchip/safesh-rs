@@ -267,3 +267,16 @@ fn find_exec_outside_target_asks() {
     assert_ne!(h.decision(), "allow", "{}", h.stdout);
     assert_absent(t);
 }
+
+#[test]
+fn agent_cannot_write_its_own_grants() {
+    // Config and session files hold grants; a redirect into them is denied outright.
+    let e = Env::new();
+    let local = e.proj.join(".config/safesh/config.local.json");
+    let h = e.hook(r#"mkdir -p .config/safesh && echo '{"allowedCommands":["evil"]}' > .config/safesh/config.local.json"#);
+    assert_eq!(h.decision(), "deny", "{}", h.stdout);
+    assert!(h.reason().contains("DENIED"), "{}", h.reason());
+    assert!(!local.exists());
+    let h = e.hook("echo '{}' > .temp/safesh/session-s1.json");
+    assert_eq!(h.decision(), "deny", "{}", h.stdout);
+}

@@ -98,3 +98,14 @@ fn nested_bash_inside_project_still_runs() {
     assert_eq!(r.code, 0, "{}", r.stderr);
     assert!(r.stdout.contains("nested-ok"), "{}", r.stdout);
 }
+
+#[test]
+fn runtime_write_to_session_grants_is_denied() {
+    let e = Env::new();
+    std::fs::create_dir_all(e.proj.join(".temp/safesh")).unwrap();
+    let r = e.hook_run(r#"x=$(echo tee); echo '{"allowedCommands":["evil"]}' | $x .temp/safesh/session-s1.json; echo after"#);
+    assert_eq!(r.code, 126, "stdout={} stderr={}", r.stdout, r.stderr);
+    assert!(r.stderr.contains("DENIED"), "{}", r.stderr);
+    assert!(!r.stdout.contains("after"), "{}", r.stdout);
+    assert!(!e.proj.join(".temp/safesh/session-s1.json").exists());
+}

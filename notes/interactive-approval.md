@@ -108,15 +108,15 @@ The approval must come from the user, never from the agent.
 | Many prompts at once (parallel tool calls) | One prompt at a time per user, behind a lock file. Others wait in a queue. If the wait would pass the timeout, fall back to text. |
 | No answer | Timeout means deny-with-text. It never means allow. |
 
-### 6.1 Existing gap: policy files are writable by the agent
+### 6.1 Policy files (fixed 2026-11-06)
 
-This applies today, with or without popups. Default write access covers files that hold grants:
-- `/tmp/safesh` (`<state>`): pending files and Codex approval records sit under `/tmp`, which is writable by default.
-- `<project>/.temp/safesh/session-<id>.json`: session grants live inside the project dir, which is writable.
-- `<project>/.config/safesh/config.local.json` and `config.json`: same.
-- `~/.config/safesh/`: not writable by default, since home writes cover only existing dot-dirs, and `~/.config` usually exists. Needs a check.
+Default write access used to cover files that hold grants: `<state>` (pending files and Codex approvals, under `/tmp`), session grants in `<project>/.temp/safesh`, and project config in `<project>/.config/safesh`. An agent could write them and grant itself access. TS has the same gap.
 
-An agent can write any of these and grant itself commands or paths. TS likely has the same gap. Proposed fix: add these paths to the built-in deny-write list, so that only `safesh retry`, `safesh install` and the approval channels write them, from outside the gate. This is a behavior change and needs sign-off.
+Now these are on a built-in deny-write list, together with the global config dir, for each workspace root and the cwd. `safesh retry`, `install` and the hook write them from outside the gate, so they still work.
+
+Limits:
+- A write naming a protected file is denied. A directory-level write into an ancestor, such as `tar -x -C .` or `cp -r x .`, can still place files inside one.
+- Programs safesh doesn't see, such as a Python script or `git checkout`, can still write them, as with every other path (`design.md` section 3).
 
 ## 7. Config
 
@@ -144,7 +144,7 @@ An agent can write any of these and grant itself commands or paths. TS likely ha
 | A4 | Runtime gate uses channels (4.2) | e2e test: approved runtime exec continues without a rerun |
 | A5 | Claude Code "ask" channel with tokens (section 5) | e2e test of the token rules; manual test in Claude Code |
 | A6 | Default argv rules for tmux and GUI automation tools | rules tests |
-| A0 | Deny-write for policy files (6.1); can ship before A1 | policy and e2e tests: the agent can't write session, config or state files |
+| A0 | Deny-write for policy files (6.1) | done 2026-11-06 |
 
 ## 9. Decisions needed
 
@@ -152,4 +152,3 @@ An agent can write any of these and grant itself commands or paths. TS likely ha
 2. Is the "ask" channel's replay risk acceptable (section 5), or wait for the spike result on what the model sees?
 3. Should popups offer all five scopes, or only "once" and "deny", leaving persistent grants to `safesh retry`?
 4. Prompt timeouts: 60 s at the pre-check and 45 s at runtime are proposed.
-5. Fix the policy-file gap in 6.1 now, ahead of the popup work?

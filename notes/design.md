@@ -173,6 +173,7 @@ Partial side effects are possible in this case. The pre-check keeps it rare.
 | Load path grants from `config.local.json` (TS wrote them on `retry-path` "always" but never read them) | approved 2026-11-05 |
 | Reject session and pending ids outside `[A-Za-z0-9_-]` | hardening; ids become file names |
 | Allow and deny entries match in lexical and canonical form; symlinks resolve for missing files too | hardening; deny under macOS `/tmp` no longer slips past |
+| Shell writes to policy files are denied: `<state>`, the global config dir, and `.config/safesh` and `.temp/safesh` under each workspace root and the cwd | approved 2026-11-06; closes an agent self-grant path |
 
 Any further change that breaks current behavior needs sign-off before it ships.
 

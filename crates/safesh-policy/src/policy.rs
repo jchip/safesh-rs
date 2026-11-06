@@ -203,7 +203,11 @@ impl Policy {
             read: with_canonical(&abs(&eff.read)),
             deny_read: with_canonical(&abs(&eff.deny_read)),
             write: with_canonical(&abs(&write)),
-            deny_write: with_canonical(&abs(perms.deny_write.as_deref().unwrap_or_default())),
+            deny_write: {
+                let mut deny = abs(perms.deny_write.as_deref().unwrap_or_default());
+                deny.extend(protected_dirs(&roots, cwd, host));
+                with_canonical(&deny)
+            },
             // Only explicit paths go to Deno. Names are resolved lazily per check (D2), since
             // resolving the whole allowlist through PATH up front costs tens of ms.
             run: eff
@@ -382,6 +386,26 @@ impl Policy {
     }
 }
 
+/// Dirs holding grants and approvals. The shell may not write them, or an agent could grant
+/// itself access. `safesh retry` and `install` write them from outside the gate. Other programs
+/// (a Python script, `git checkout`) are outside what safesh sees, as everywhere else.
+fn protected_dirs(roots: &[String], cwd: &Path, host: &HostEnv) -> Vec<PathBuf> {
+    let mut dirs = vec![
+        host.state_dir.clone(),
+        crate::config::get_global_config_dir(host),
+    ];
+    let cwd_s = cwd.to_string_lossy();
+    let bases = roots
+        .iter()
+        .map(|r| PathBuf::from(resolve_lexical(&cwd_s, r)))
+        .chain(std::iter::once(cwd.to_path_buf()));
+    for base in bases {
+        dirs.push(base.join(".temp").join("safesh"));
+        dirs.push(base.join(".config").join("safesh"));
+    }
+    dirs
+}
+
 /// Streams and terminal devices that hold no data, so bash redirects to them need no grant.
 fn is_device(path: &Path) -> bool {
     const DEVICES: &[&str] = &[
@@ -440,11 +464,12 @@ enum State {
 impl From<PermissionState> for State {
     fn from(s: PermissionState) -> Self {
         match s {
-            PermissionState::Granted => Self::Granted,
+            // GrantedPartial: this path is granted, but some descendants are denied (for example a
+            // project root holding `.config/safesh`). Writes that name a denied descendant are
+            // still denied on their own.
+            PermissionState::Granted | PermissionState::GrantedPartial => Self::Granted,
             PermissionState::Denied | PermissionState::DeniedPartial => Self::Denied,
-            PermissionState::GrantedPartial
-            | PermissionState::Prompt
-            | PermissionState::Ignored => Self::Prompt,
+            PermissionState::Prompt | PermissionState::Ignored => Self::Prompt,
         }
     }
 }
