@@ -1,0 +1,15 @@
+[package]
+name = "safesh-hooks"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+safesh-policy = { path = "../safesh-policy" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

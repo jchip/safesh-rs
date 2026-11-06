@@ -85,6 +85,9 @@ pub struct Config {
     pub permissions: Option<PermissionsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<EnvConfig>,
+    /// Argv rules: allow, ask or deny by argv prefix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules: Option<Vec<crate::rules::Rule>>,
     /// Keys this version does not know, including dropped ones. Kept so saves do not lose them.
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,

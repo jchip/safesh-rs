@@ -9,5 +9,7 @@ pub mod host;
 pub mod paths;
 pub mod policy;
 pub mod project;
+pub mod rules;
 pub mod scratchpad;
+pub mod spec;
 pub mod state;

@@ -82,6 +82,11 @@ pub fn merge_configs(base: &Config, over: &Config) -> Config {
             &base.env.clone().unwrap_or_default(),
             &over.env.clone().unwrap_or_default(),
         )),
+        // Rules only accumulate, so a project can't drop a global deny.
+        rules: match (&base.rules, &over.rules) {
+            (None, None) => None,
+            (b, o) => Some(b.iter().chain(o.iter()).flatten().cloned().collect()),
+        },
         extra,
     }
 }
