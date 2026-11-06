@@ -19,7 +19,7 @@ pub struct HostEnv {
     pub claude_project_dir: Option<PathBuf>,
     /// Real uid of this process.
     pub uid: u32,
-    /// Root for safesh state: pending files, script cache. `/tmp/safesh` in production.
+    /// Root for safesh state: pending files, script cache. `$SAFESH_STATE_DIR`, else `/tmp/safesh`.
     pub state_dir: PathBuf,
 }
 
@@ -34,7 +34,8 @@ impl HostEnv {
             path: var("PATH"),
             claude_project_dir: var("CLAUDE_PROJECT_DIR").map(PathBuf::from),
             uid: rustix::process::getuid().as_raw(),
-            state_dir: PathBuf::from("/tmp/safesh"),
+            state_dir: var("SAFESH_STATE_DIR")
+                .map_or_else(|| PathBuf::from("/tmp/safesh"), PathBuf::from),
         }
     }
 }

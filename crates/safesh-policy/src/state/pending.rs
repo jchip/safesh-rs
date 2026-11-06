@@ -19,6 +19,9 @@ pub struct PendingCommand {
     pub timeout: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_in_background: Option<bool>,
+    /// Agent session id, so retry choice "this session" knows where to write (D3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     /// ISO 8601.
     pub created_at: String,
 }
@@ -40,6 +43,9 @@ pub struct PendingPathRequest {
     pub script_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_in_background: Option<bool>,
+    /// Agent session id, so retry choice "this session" knows where to write (D3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     /// ISO 8601.
     pub created_at: String,
 }

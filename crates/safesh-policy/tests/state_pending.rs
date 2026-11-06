@@ -27,6 +27,7 @@ fn cmd(id: &str) -> PendingCommand {
         project_dir: None,
         timeout: Some(5000),
         run_in_background: Some(false),
+        session_id: None,
         created_at: "2026-01-01T00:00:00.000Z".into(),
     }
 }
@@ -39,6 +40,7 @@ fn path_req(id: &str) -> PendingPathRequest {
         cwd: "/test/cwd".into(),
         script_hash: "def456".into(),
         run_in_background: None,
+        session_id: None,
         created_at: "2026-01-01T00:00:00.000Z".into(),
     }
 }

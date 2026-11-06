@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::Agent;
 
 /// Shell tool call read from hook stdin.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HookInput {
     pub tool_name: String,
     pub command: String,

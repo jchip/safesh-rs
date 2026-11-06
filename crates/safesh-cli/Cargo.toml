@@ -14,3 +14,11 @@ workspace = true
 
 [dependencies]
 safesh-policy = { path = "../safesh-policy" }
+safesh-exec = { path = "../safesh-exec" }
+safesh-analyze = { path = "../safesh-analyze" }
+safesh-hooks = { path = "../safesh-hooks" }
+clap.workspace = true
+sha2.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
