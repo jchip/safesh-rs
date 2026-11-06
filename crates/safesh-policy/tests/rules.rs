@@ -3,13 +3,13 @@ use safesh_policy::rules::{Rule, RuleAction, evaluate, evaluate_pipeline, valida
 
 fn r(pat: &[&str], action: RuleAction) -> Rule {
     Rule {
-        pattern: pat.iter().map(|s| s.to_string()).collect(),
+        pattern: pat.iter().map(std::string::ToString::to_string).collect(),
         action,
     }
 }
 
 fn v(s: &[&str]) -> Vec<String> {
-    s.iter().map(|s| s.to_string()).collect()
+    s.iter().map(std::string::ToString::to_string).collect()
 }
 
 use RuleAction::{Allow, Ask, Deny};

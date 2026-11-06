@@ -5,6 +5,7 @@
 //! program (D2) instead of matching by basename.
 
 mod commands;
+mod exec;
 mod load;
 mod sys;
 
@@ -30,6 +31,7 @@ use sys::HostSys;
 pub use commands::{
     MultiCommandResult, candidate_cwds, check_command_allowed_in_any_cwd, check_multiple_commands,
 };
+pub use exec::Problem;
 pub use load::{LoadedSession, load_session_config, merge_session_permissions};
 
 #[derive(Debug, thiserror::Error)]
@@ -165,6 +167,7 @@ pub struct Policy {
     /// `permissions.run`, including session grants, for exact-string matches.
     run_set: BTreeSet<String>,
     allow_project_commands: bool,
+    rules: Vec<crate::rules::Rule>,
 }
 
 impl Policy {
@@ -222,6 +225,7 @@ impl Policy {
                 .into_iter()
                 .chain(PATH_CHECKED_COMMANDS.iter().map(|c| (*c).to_string()))
                 .collect(),
+            rules: config.rules.clone().unwrap_or_default(),
             allow_project_commands: config
                 .allow_project_commands
                 .unwrap_or(opts.session_id.is_some()),

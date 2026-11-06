@@ -14,3 +14,12 @@ pub enum Item {
     /// Must ask whatever the lists say. Holds a short reason for the prompt.
     Ask(String),
 }
+
+/// Interprets one argv into items. Temporary: runs `argv[0]` only, until the spec table lands.
+#[must_use]
+pub fn interpret(argv: &[String]) -> Vec<Item> {
+    argv.first()
+        .map(|p| Item::Run(p.clone()))
+        .into_iter()
+        .collect()
+}

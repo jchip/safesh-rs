@@ -22,6 +22,7 @@ pub struct Rule {
 }
 
 /// Strongest action among rules whose pattern has no `|` and matches `argv`.
+#[must_use]
 pub fn evaluate(rules: &[Rule], argv: &[String]) -> Option<RuleAction> {
     rules
         .iter()
@@ -32,6 +33,7 @@ pub fn evaluate(rules: &[Rule], argv: &[String]) -> Option<RuleAction> {
 }
 
 /// Strongest action among `|` rules whose stage patterns match consecutive pipeline stages.
+#[must_use]
 pub fn evaluate_pipeline(rules: &[Rule], stages: &[Vec<String>]) -> Option<RuleAction> {
     rules
         .iter()
@@ -45,6 +47,7 @@ pub fn evaluate_pipeline(rules: &[Rule], stages: &[Vec<String>]) -> Option<RuleA
 }
 
 /// Error messages for malformed rules. Empty when all rules are valid.
+#[must_use]
 pub fn validate(rules: &[Rule]) -> Vec<String> {
     let mut errs = Vec::new();
     for (i, r) in rules.iter().enumerate() {
@@ -120,15 +123,15 @@ fn compile(glob: &str) -> Vec<Piece> {
 }
 
 fn glob_match(glob: &str, text: &str) -> bool {
-    let pieces = compile(glob);
     let text: Vec<char> = text.chars().collect();
-    fn go(p: &[Piece], t: &[char]) -> bool {
-        match p.split_first() {
-            None => t.is_empty(),
-            Some((Piece::Any, rest)) => (0..=t.len()).any(|k| go(rest, &t[k..])),
-            Some((Piece::One, rest)) => !t.is_empty() && go(rest, &t[1..]),
-            Some((Piece::Lit(c), rest)) => t.first() == Some(c) && go(rest, &t[1..]),
-        }
+    match_pieces(&compile(glob), &text)
+}
+
+fn match_pieces(p: &[Piece], t: &[char]) -> bool {
+    match p.split_first() {
+        None => t.is_empty(),
+        Some((Piece::Any, rest)) => (0..=t.len()).any(|k| match_pieces(rest, &t[k..])),
+        Some((Piece::One, rest)) => !t.is_empty() && match_pieces(rest, &t[1..]),
+        Some((Piece::Lit(c), rest)) => t.first() == Some(c) && match_pieces(rest, &t[1..]),
     }
-    go(&pieces, &text)
 }
