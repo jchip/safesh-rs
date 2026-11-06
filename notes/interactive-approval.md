@@ -29,13 +29,13 @@ safesh tries channels in order and uses the first one that is available. If none
 
 | Order | Channel | Available when | Stage |
 |---|---|---|---|
-| 1 | Agent-native "ask" | agent is Claude Code | pre-check only |
+| 1 | Agent-native "ask" | the hook runs as `safesh hook claude` | pre-check only |
 | 2 | tmux popup | `$TMUX` and `$TMUX_PANE` are set in the hook env | pre-check and runtime |
 | 3 | GUI dialog | macOS, not over SSH; Linux with `$DISPLAY` or `$WAYLAND_DISPLAY` and `zenity` or `kdialog` | pre-check and runtime |
 | 4 | Text (today) | always | pre-check and runtime |
 
 Channel details:
-- **Agent-native:** see section 5.
+- **Agent-native:** see section 5. The agent comes from the hook's argv, which `safesh install` writes, so detection never guesses from env vars or stdin fields. For `codex`, `gemini` and `agy`, safesh skips this channel.
 - **tmux:** `tmux display-popup -E -t "$TMUX_PANE" -- safesh approve-ui --id <pending>`. The popup runs a small safesh TUI that reads one choice and writes it to the pending file. Kitty, WezTerm and Zellij floating panes are possible later channels of the same kind.
 - **macOS GUI:** `osascript` with `choose from list` for the five choices (`display dialog` allows only three buttons). The command text goes in as an argv item (`on run argv`), never spliced into AppleScript source.
 - **Linux GUI:** `zenity --list --radiolist`, or `kdialog --radiolist`.
@@ -87,12 +87,12 @@ Claude Code shows its normal prompt with the reason and the rewritten command. I
 
 Limits:
 - It only offers "allow once". Persistent scopes still go through `safesh retry` or a GUI or tmux channel.
-- Claude Code's "don't ask again" would save a rule for the rewritten command. That rule is useless, since script ids change. Not documented; test it in the spike.
+- Claude Code records the approval as once-only and saves no rule (spike result). Each new command prompts again.
 
 Replay risk: if the user declines, the agent could try to run the same `safesh run --pending ... --token ...` command itself.
 - The token is 128 random bits, stored only in the pending file, single use, bound to the session id, and valid for 5 minutes.
 - `safesh run` with `--pending` and `--token` is no longer control-plane passthrough. The hook treats it as a normal command and requires that the hook itself issued the token to this session in an "ask" answer.
-- Open: whether Claude Code shows `updatedInput` to the model. If it doesn't, the agent never sees the token. The spike checks this.
+- The model does not see `updatedInput` (spike result). A declined token is never written to the transcript. An approved one is, but it is already spent.
 
 ## 6. Security
 
@@ -149,6 +149,6 @@ Limits:
 ## 9. Decisions needed
 
 1. ~~Default `channels`~~: `["ask", "tmux", "gui"]`, approved 2026-11-06.
-2. Is the "ask" channel's replay risk acceptable (section 5), or wait for the spike result on what the model sees?
-3. Should popups offer all five scopes, or only "once" and "deny", leaving persistent grants to `safesh retry`?
-4. Prompt timeouts: 60 s at the pre-check and 45 s at runtime are proposed.
+2. ~~"ask" replay risk~~: acceptable. The spike showed the model never sees the token.
+3. ~~Popup scopes~~: all five, approved 2026-11-06.
+4. ~~Prompt timeouts~~: 60 s at the pre-check and 45 s at runtime, approved 2026-11-06. safesh enforces them with its own timer for every channel.

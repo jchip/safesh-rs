@@ -5,7 +5,7 @@ dir=/tmp/safesh-ask-spike
 log="$dir/hook.log"
 echo "== tokens issued"
 grep '^issued' "$log" || echo "(none: the hook never answered ask)"
-proj="$HOME/.claude/projects/$(printf '%s' "$dir" | sed 's#[/.]#-#g')"
+proj="$HOME/.claude/projects/$(printf "%s" "$(cd "$dir" && pwd -P)" | sed 's#[/.]#-#g')"
 tx=$(ls -t "$proj"/*.jsonl 2>/dev/null | head -1)
 echo "== transcript: ${tx:-not found under $proj}"
 if [ -n "$tx" ]; then
