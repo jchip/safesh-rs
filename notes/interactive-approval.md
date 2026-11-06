@@ -1,6 +1,6 @@
 # Interactive approval: design
 
-Status: draft for review, 2026-11-06. Not implemented.
+Status: channels approved 2026-11-06 (ask, tmux, gui). A1 spike in progress: see `approval-spike-results.md`.
 Related: `design.md` sections 5 and 6, `architecture.md` sections 2 and 5.
 
 ## 1. Goal
@@ -132,7 +132,7 @@ Limits:
 
 - `channels`: the order to try. `[]` means text only, which is today's behavior.
 - `SAFESH_APPROVAL=off` forces text only, for CI and headless runs.
-- Default: to decide (section 9).
+- Default: `["ask", "tmux", "gui"]` (approved 2026-11-06).
 
 ## 8. Plan
 
@@ -148,7 +148,7 @@ Limits:
 
 ## 9. Decisions needed
 
-1. Default `channels`. Text only keeps today's behavior. `["ask", "tmux", "gui"]` gives the best experience.
+1. ~~Default `channels`~~: `["ask", "tmux", "gui"]`, approved 2026-11-06.
 2. Is the "ask" channel's replay risk acceptable (section 5), or wait for the spike result on what the model sees?
 3. Should popups offer all five scopes, or only "once" and "deny", leaving persistent grants to `safesh retry`?
 4. Prompt timeouts: 60 s at the pre-check and 45 s at runtime are proposed.

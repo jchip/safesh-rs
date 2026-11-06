@@ -12,6 +12,7 @@ The TS repo is at `~/dev/safesh`. Port sources live there under `src/core`, `src
 | `architecture.md` | **Architecture**: request flows, Deno-style enforcement core, brush integration, crates and modules, files on disk |
 | `plan.md` | **Execution plan**: phases P0-P7 with status, exit checks and P1 next steps |
 | `interactive-approval.md` | **Draft**: asking the user directly (Claude Code ask, tmux popup, GUI dialog) with text fallback |
+| `approval-spike-results.md` | A1 spike: which approval channels work from a hook process |
 | `rust-runner-spike-results.md` | P0 spike results: hook coverage, corpus compatibility, latency |
 | `rust-shell-spike.html` | Visual summary of the final design (published artifact) |
 | `archive/` | Superseded docs. `rust-runner-design.md` was split into the three docs above. |
