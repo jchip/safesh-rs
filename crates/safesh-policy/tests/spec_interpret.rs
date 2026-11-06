@@ -1195,10 +1195,11 @@ fn nested_wrappers() {
 }
 
 #[test]
-fn wrapper_around_shell_emits_no_run_for_the_shell() {
+fn wrapper_around_shell_gets_a_run_check() {
+    // `env` execs bash outside safesh, so the shell itself must be allowed.
     assert_eq!(
         go(&["env", "A=1", "bash", "s.sh"]),
-        vec![run("env"), r("s.sh")]
+        vec![run("env"), run("bash"), r("s.sh")]
     );
 }
 
@@ -1399,4 +1400,25 @@ fn sudo_without_command() {
         go(&["sudo"]),
         vec![run("sudo"), ask("sudo runs as another user")]
     );
+}
+
+#[test]
+fn shells_under_wrappers_get_a_run_check() {
+    // `env` execs bash itself, outside safesh, so the payload is never seen by the gate.
+    for argv in [
+        vec!["env", "bash", "-c", "rm -rf /"],
+        vec!["xargs", "sh", "-c", "rm $0"],
+        vec!["timeout", "5", "dash", "-c", "x"],
+    ] {
+        let argv: Vec<String> = argv.into_iter().map(String::from).collect();
+        let items = safesh_policy::spec::interpret(&argv);
+        assert!(
+            items
+                .iter()
+                .any(|i| matches!(i, safesh_policy::spec::Item::Run(p) if p.ends_with("sh"))),
+            "{argv:?}: {items:?}"
+        );
+    }
+    let top: Vec<String> = ["bash", "-c", "ls"].into_iter().map(String::from).collect();
+    assert!(safesh_policy::spec::interpret(&top).is_empty());
 }

@@ -18,7 +18,7 @@ pub enum Item {
 /// Interpret one argv (`argv[0]` is the program as written) into run, path and ask items.
 #[must_use]
 pub fn interpret(argv: &[String]) -> Vec<Item> {
-    run(argv).items
+    run(argv, false).items
 }
 
 #[derive(Default)]
@@ -60,7 +60,7 @@ impl Out {
     }
 
     fn inner(&mut self, argv: &[String]) {
-        let inner = run(argv);
+        let inner = run(argv, true);
         self.items.extend(inner.items);
         self.writer |= inner.writer;
     }
@@ -216,14 +216,16 @@ fn parse(args: &[String], syn: &Syn) -> Option<Parsed> {
 
 // ---------------------------------------------------------------- dispatch
 
-fn run(full: &[String]) -> Out {
+/// `nested` is true for a command started by a wrapper (`env`, `xargs`, `find -exec`...).
+/// Such a shell is a real exec outside safesh, so it gets a run check like any program.
+fn run(full: &[String], nested: bool) -> Out {
     let mut out = Out::default();
     let Some(prog) = full.first() else {
         return out;
     };
     let name = base(prog);
     let args = &full[1..];
-    if !matches!(name, "bash" | "sh" | "dash") {
+    if nested || !matches!(name, "bash" | "sh" | "dash") {
         out.items.push(Item::Run(prog.clone()));
     }
     let ok = match name {
@@ -887,7 +889,7 @@ fn find(args: &[String], out: &mut Out) -> Option<()> {
                 if cmd.is_empty() {
                     return None;
                 }
-                let inner = run(cmd);
+                let inner = run(cmd, true);
                 out.writer |= inner.writer;
                 for item in inner.items {
                     match item {
@@ -964,7 +966,7 @@ fn env(args: &[String], out: &mut Out) -> Option<()> {
     if rest.is_empty() {
         return Some(());
     }
-    let mut inner = run(rest);
+    let mut inner = run(rest, true);
     if let Some(dir) = p.last(&["-C", "--chdir"]) {
         for item in &mut inner.items {
             if let Item::Path { path, .. } = item {
@@ -1044,7 +1046,7 @@ fn xargs(args: &[String], out: &mut Out) -> Option<()> {
     } else {
         p.operands
     };
-    let mut inner = run(&cmd);
+    let mut inner = run(&cmd, true);
     if inner.writer {
         inner.items.retain(|i| !matches!(i, Item::Path { .. }));
         inner.items.push(Item::Ask(format!(
