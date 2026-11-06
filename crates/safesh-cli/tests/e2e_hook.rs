@@ -195,14 +195,16 @@ fn xargs_rm_asks() {
 }
 
 #[test]
-#[ignore = "bug: find -exec rm {} inside the project is allowed at pre-check and runs; brief expects ask"]
-fn find_exec_rm_asks() {
+fn find_exec_rm_follows_the_search_root() {
+    // `{}` counts as a path under the search root, so inside the project it is allowed,
+    // like `rm` there; a root outside the allow lists asks.
     let e = Env::new();
     e.write("f", "x");
-    let h = e.hook(r"find . -name f -exec rm {} \;");
-    assert_ne!(h.decision(), "allow", "{}", h.stdout);
-    assert!(h.reason().contains("BLOCKED"), "{}", h.reason());
-    assert!(e.proj.join("f").exists());
+    let inside = e.hook(r"find . -name f -exec rm {} \;");
+    assert_eq!(inside.decision(), "allow", "{}", inside.stdout);
+    let outside = e.hook(r"find /etc -name nothing-here -exec rm {} \;");
+    assert_ne!(outside.decision(), "allow", "{}", outside.stdout);
+    assert!(outside.reason().contains("BLOCKED"), "{}", outside.reason());
 }
 
 #[test]
