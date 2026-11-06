@@ -1,11 +1,210 @@
-//! brush-core embedding: runs a script with policy gates on every exec and file open.
+//! brush-core embedding: runs a script with a policy gate on every exec and file open.
+//!
+//! Nested `bash`, `sh` and `dash` are re-routed to `safesh shell`, so their commands hit the gate too.
+//! A denial prints the gate's message and stops the whole run with status 126.
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn patched_brush_core_has_check_open() {
-        fn has<T: brush_core::extensions::ProcessLauncher>() {}
-        has::<brush_core::extensions::DefaultProcessLauncher>();
-        let _ = <brush_core::extensions::DefaultProcessLauncher as brush_core::extensions::ProcessLauncher>::check_open;
+mod args;
+
+use std::io::{self, Write as _};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use brush_builtins::{BuiltinSet, ShellBuilderExt as _};
+use brush_core::extensions::{DefaultProcessLauncher, ProcessLauncher, ShellExtensionsImpl};
+use brush_core::processes::{ChildProcess, LaunchRequest};
+
+pub use args::{ShellArgs, parse_bash_args};
+pub use safesh_policy::effect::Access;
+
+/// Exit status for a run stopped by policy.
+pub const DENIED_STATUS: u8 = 126;
+
+/// One exec the shell is about to start.
+#[derive(Debug, Clone)]
+pub struct ExecRequest<'a> {
+    /// Program as resolved by the shell; may be relative to `cwd`.
+    pub program: &'a Path,
+    /// `argv[0]` as the process will see it, then the arguments.
+    pub argv: Vec<String>,
+    pub cwd: &'a Path,
+}
+
+/// Decides execs and opens. On a denial it returns the text to show the user; it is responsible
+/// for any side effects such as writing a pending file.
+pub trait Gate: Send + Sync {
+    fn check_exec(&self, req: &ExecRequest<'_>) -> Result<(), String>;
+    /// `path` is absolute.
+    fn check_open(&self, path: &Path, access: Access) -> Result<(), String>;
+}
+
+/// Settings shared by every launch in one run.
+#[derive(Clone)]
+struct Ctx {
+    gate: Arc<dyn Gate>,
+    self_exe: PathBuf,
+    /// Env vars passed to nested shells so they rebuild the same policy.
+    nested_env: Vec<(String, String)>,
+}
+
+/// `Default` is required by brush. A launcher without a context denies everything.
+#[derive(Clone, Default)]
+struct PolicyLauncher {
+    ctx: Option<Arc<Ctx>>,
+}
+
+type Extensions = ShellExtensionsImpl<
+    brush_core::extensions::DefaultErrorFormatter,
+    PolicyLauncher,
+    brush_core::extensions::DefaultTaskSpawner,
+>;
+
+impl PolicyLauncher {
+    fn ctx(&self) -> Result<&Ctx, io::Error> {
+        self.ctx
+            .as_deref()
+            .ok_or_else(|| abort("[SAFESH] BLOCKED: no policy loaded"))
+    }
+
+    fn check_exec(&self, req: &LaunchRequest) -> Result<(), io::Error> {
+        let ctx = self.ctx()?;
+        let mut argv = Vec::with_capacity(req.args.len() + 1);
+        argv.push(req.argv0.clone());
+        argv.extend(req.args.iter().cloned());
+        let exec = ExecRequest {
+            program: &req.program,
+            argv,
+            cwd: &req.working_dir,
+        };
+        ctx.gate.check_exec(&exec).map_err(|m| abort(&m))
+    }
+
+    /// Re-route nested shells to `safesh shell`, keeping their arguments.
+    fn reroute_shell(&self, req: &mut LaunchRequest) {
+        let Some(ctx) = self.ctx.as_deref() else {
+            return;
+        };
+        let name = req
+            .program
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        if !matches!(name, "bash" | "sh" | "dash") {
+            return;
+        }
+        req.program.clone_from(&ctx.self_exe);
+        let mut args = vec![
+            "shell".to_string(),
+            "--shell-name".into(),
+            req.argv0.clone(),
+            "--".into(),
+        ];
+        args.append(&mut req.args);
+        req.args = args;
+        req.argv0 = "safesh".into();
+        for (k, v) in &ctx.nested_env {
+            req.env.retain(|(ek, _)| ek != k);
+            req.env.push((k.clone(), v.clone()));
+        }
+    }
+}
+
+/// Prints the denial and stops the run. Children in a pipeline see a closed pipe and exit.
+fn abort(message: &str) -> io::Error {
+    let _ = io::stdout().flush();
+    let mut err = io::stderr().lock();
+    let _ = writeln!(err, "{message}");
+    let _ = err.flush();
+    std::process::exit(i32::from(DENIED_STATUS));
+}
+
+impl ProcessLauncher for PolicyLauncher {
+    fn spawn(&self, mut request: LaunchRequest) -> Result<ChildProcess, io::Error> {
+        self.check_exec(&request)?;
+        self.reroute_shell(&mut request);
+        DefaultProcessLauncher.spawn(request)
+    }
+
+    fn exec(&self, mut request: LaunchRequest) -> io::Error {
+        if let Err(e) = self.check_exec(&request) {
+            return e;
+        }
+        self.reroute_shell(&mut request);
+        DefaultProcessLauncher.exec(request)
+    }
+
+    fn check_open(&self, path: &Path, write: bool) -> Result<(), io::Error> {
+        let ctx = self.ctx()?;
+        let access = if write { Access::Write } else { Access::Read };
+        ctx.gate.check_open(path, access).map_err(|m| abort(&m))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ExecError {
+    #[error("shell setup failed: {0}")]
+    Setup(String),
+}
+
+/// What to run and how.
+pub struct RunConfig {
+    pub args: ShellArgs,
+    /// Path to the running safesh binary, for nested shells.
+    pub self_exe: PathBuf,
+    /// Env vars nested shells need to rebuild the same policy.
+    pub nested_env: Vec<(String, String)>,
+}
+
+/// Runs a script under the gate and returns its exit status.
+pub async fn run(config: RunConfig, gate: Arc<dyn Gate>) -> Result<u8, ExecError> {
+    let RunConfig {
+        args,
+        self_exe,
+        nested_env,
+    } = config;
+    let launcher = PolicyLauncher {
+        ctx: Some(Arc::new(Ctx {
+            gate,
+            self_exe,
+            nested_env,
+        })),
+    };
+    let positional = args.positional.clone();
+    let mut shell = brush_core::Shell::builder_with_extensions::<Extensions>()
+        .process_launcher(launcher)
+        .profile(brush_core::ProfileLoadBehavior::Skip)
+        .rc(brush_core::RcLoadBehavior::Skip)
+        .command_string_mode(args.command.is_some())
+        .shell_name(args.shell_name.clone())
+        .shell_args(positional.clone())
+        .default_builtins(BuiltinSet::BashMode)
+        .build()
+        .await
+        .map_err(|e| ExecError::Setup(e.to_string()))?;
+
+    if !args.set_options.is_empty() {
+        let set_cmd = format!("set {}", args.set_options.join(" "));
+        let params = shell.default_exec_params();
+        let _ = shell
+            .run_string(set_cmd, &brush_core::SourceInfo::default(), &params)
+            .await
+            .map_err(|e| ExecError::Setup(e.to_string()))?;
+    }
+
+    let result = match (&args.command, &args.script) {
+        (Some(cmd), _) => shell.run_dash_c_command(cmd.clone()).await,
+        (None, Some(script)) => shell.run_script(script, positional.iter().cloned()).await,
+        (None, None) => {
+            let mut text = String::new();
+            io::Read::read_to_string(&mut io::stdin(), &mut text)
+                .map_err(|e| ExecError::Setup(e.to_string()))?;
+            shell.run_dash_c_command(text).await
+        }
+    };
+    match result {
+        Ok(r) => Ok(u8::from(r.exit_code)),
+        Err(e) => {
+            eprintln!("safesh: {e}");
+            Ok(1)
+        }
     }
 }
