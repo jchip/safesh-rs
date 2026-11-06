@@ -118,9 +118,19 @@ The nested-shell trick only covers shells started by our engine. A `bash` starte
 
 ### 4.6 Static pre-check
 
-This is a Rust port of `passthrough-analyzer.ts`, built on the brush-parser AST. It extracts command words, redirect targets, cd targets, final cwd, and pipeline-shaped rule matches. Anything not allowed causes a deny-with-retry before the run, as today.
+This replaces `passthrough-analyzer.ts` and the prehook's command extraction, built on the brush-parser AST. It is not a line-by-line port. The TS analyzer decided whether native bash or zsh could run a script, and much of it handled zsh word-splitting and glob differences. That part is dropped.
+
+The pre-check lists every command it would run, every redirect and `source` target, the cwd at each point, and the final cwd. Anything not allowed causes a deny-with-retry before the run, as today.
 
 When the analyzer can't resolve something, such as `$x` as a command name, it allows the run and the runtime hook decides. This removes the static-resolution bug class without weakening checks.
+
+Walk rules:
+- It walks into `$( )`, backticks, `<( )` and unquoted here-doc bodies. TS's permission check never looked inside `$( )`, so those commands now prompt before the run instead of failing at runtime.
+- Variables follow bash scoping. Subshells, substitutions and pipeline stages get their own scope; `{ }` groups don't. `FOO=x cmd` applies only to `cmd`. `export A=1` counts as an assignment.
+- Redirect and command cwds stop being known after a `cd` the walk can't be sure ran. The final cwd assumes every `&&` step succeeds.
+- Wrappers like `env`, `xargs` and `bash -c` are plain commands here. Unwrapping happens in the shared Interpret stage, so the pre-check and the runtime can't disagree.
+- `source` and `.` targets are read checks. `cd` is not checked; it only moves the tracked cwd.
+- Control-plane commands pass through untouched: `safesh run|retry|retry-path`, plus `desh retry|retry-path` for one release.
 
 ## 5. Runtime denial
 

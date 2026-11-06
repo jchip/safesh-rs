@@ -11,7 +11,7 @@ Each phase has an exit check. Tasks marked **(mech)** are mechanical and go to l
 |---|---|---|
 | P0 | Hands-on spike: brush, policy launcher, redirect gate | done, passed |
 | P1 | Workspace and policy core | exit check met; small items left |
-| P2 | Static pre-check | not started |
+| P2 | Static pre-check | in progress |
 | P3 | Exec engine | not started |
 | P4 | Agent adapters | not started |
 | P5 | Shadow mode | not started |
