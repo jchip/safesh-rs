@@ -1,6 +1,6 @@
 # brush policy spike
 
-Throwaway prototype for P0 of `notes/rust-runner-design.md`. Results are in `notes/rust-runner-spike-results.md`.
+Throwaway prototype for P0 of `notes/plan.md`. Results are in `notes/rust-runner-spike-results.md`.
 
 It embeds brush-core with a `PolicyLauncher`:
 - It checks every external exec. This includes deny-by-name, `git push --force`, and path args of file-changing commands.

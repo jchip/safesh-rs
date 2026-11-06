@@ -1,33 +1,21 @@
 # safesh-rs notes
 
+safesh-rs is the Rust rewrite of safesh. It is a non-interactive bash runner for AI agents. It runs commands in an embedded brush shell and checks every exec and file open against a policy.
+
+The TS repo is at `~/dev/safesh`. Port sources live there under `src/core`, `src/hooks` and `hooks/`.
+
 ## Documents
 
 | File | What it is |
 |---|---|
-| `rust-runner-design.md` | **Design and execution plan**: architecture, policy model, decisions, phases P0-P7 |
+| `design.md` | **Design**: goal, boundary, policy model, runtime denial, config and migration, decisions D1-D6 |
+| `architecture.md` | **Architecture**: request flows, Deno-style enforcement core, brush integration, crates and modules, files on disk |
+| `plan.md` | **Execution plan**: phases P0-P7 with status, exit checks and P1 next steps |
 | `rust-runner-spike-results.md` | P0 spike results: hook coverage, corpus compatibility, latency |
 | `rust-shell-spike.html` | Visual summary of the final design (published artifact) |
-
-The TS repo is at `~/dev/safesh`. Port sources live there under `src/core`, `src/hooks` and `hooks/`.
+| `archive/` | Superseded docs. `rust-runner-design.md` was split into the three docs above. |
 
 ## Status (2026-11-05)
 
 - P0 spike: done and passed.
-- P1 policy core: in progress. The workspace and CI are scaffolded. The policy code is not written yet.
-
-## P1 handoff
-
-Scratch inputs are in `.temp/`, which is gitignored:
-
-| File | Use |
-|---|---|
-| `.temp/p1-test-spec.md` | 330 test rows extracted from the TS tests, with SKIP and CHANGED-BY-DESIGN marks. Port from this. |
-| `.temp/port-inventory.md` | Config fields, merge rules, default lists, state files, hook protocols |
-| `.temp/crate-survey.md` | Crate picks with versions (also in the design doc, section 4.3) |
-| `.temp/brush-spike/` | brush clone with the `check_open` patch, builds, corpus report |
-
-Next steps:
-1. Add `deno_permissions` (pinned) behind `safesh-policy::policy`. Map config `permissions.*` to `PermissionsOptions`.
-2. Write the config loader (JSON, today's merge rules) and the session and pending file I/O.
-3. Port the spec rows for permissions, config, session, pending, project-root and scratchpad.
-4. `src/external` and the `external` config field are out of scope. Skip spec rows pv-*, cv-5, cv-7 and pd-13 to pd-15.
+- P1 policy core: in progress. The workspace and CI are scaffolded. The policy code is not written yet. See `plan.md` for next steps.
