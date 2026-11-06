@@ -1,6 +1,6 @@
 # safesh in Rust: Execution Plan
 
-Status as of 2026-11-05: P0 done, P1 in progress.
+Status as of 2026-11-05: P0 done. P1 exit check met; three small items left.
 Related: `design.md` (what and why), `architecture.md` (how it is built).
 
 Each phase has an exit check. Tasks marked **(mech)** are mechanical and go to lower-model subagents. The TS repo stays in use until cutover in P6.
@@ -10,7 +10,7 @@ Each phase has an exit check. Tasks marked **(mech)** are mechanical and go to l
 | Phase | What | Status |
 |---|---|---|
 | P0 | Hands-on spike: brush, policy launcher, redirect gate | done, passed |
-| P1 | Workspace and policy core | in progress |
+| P1 | Workspace and policy core | exit check met; small items left |
 | P2 | Static pre-check | not started |
 | P3 | Exec engine | not started |
 | P4 | Agent adapters | not started |
@@ -36,17 +36,16 @@ Follow-ups from P0, assigned to later phases:
 - Upstream fix for `wait <pid>` (P3).
 - Clean abort-on-denial path in place of `process::exit` (P3).
 - Full bash flag parsing for nested shells (P3).
-- Corpus rerun against bash 5 on Linux and macOS in CI (P1).
+- Corpus rerun against bash 5 on Linux and macOS in CI (P3, needs brush in CI).
 
-## P1. Workspace and policy core (in progress)
+## P1. Workspace and policy core (exit check met)
 
 - **(mech)** Set up the cargo workspace, CI for macOS and Linux, clippy and fmt. **Done.**
 - Write the `policy` facade over `deno_permissions`, with `Effect`, `Request` and `Decision`. **Done.** The `Responder` trait moves to P3/P4, where its callers live.
 - Write the config loader with today's merge rules. **Done.**
 - Write the session and pending file I/O. **Done.**
 - **(mech)** Port the paths, project-root, scratchpad, config, session and pending tests. **Done**, 200 tests.
-- **(mech)** Port the policy tests (command, path, effective permissions, session merge) and audit row coverage. In progress.
-- **(mech)** Add the bash 5 corpus rerun to CI.
+- **(mech)** Port the policy tests (command, path, effective permissions, session merge) and audit row coverage. **Done**, 273 tests in all. Every spec row has a test, a SKIP, or an `external` reason.
 
 Exit check: the ported tests pass with the same decisions as TS.
 
@@ -61,10 +60,9 @@ Scratch inputs are in `.temp/`, which is gitignored:
 | `.temp/crate-survey.md` | Crate picks with versions (also in `architecture.md` section 9) |
 | `.temp/brush-spike/` | brush clone with the `check_open` patch, builds, corpus report |
 
-1. Finish the policy spec rows (cmd, tp, pd, perm, pu-13..18, ses-25..31) and fix any facade gaps they expose.
-2. Close the coverage audit: every spec row has a test, a SKIP, or an `external` reason.
-3. Make the scratchpad tests hermetic. Two of them touch the real `/tmp/claude-<uid>`.
-4. Add the bash 5 corpus rerun to CI.
+1. Make the scratchpad tests hermetic. Two of them touch the real `/tmp/claude-<uid>`, as the TS tests did.
+2. Decide on cwd `/`. The facade adds the base cwd to default read, so cwd `/` makes every path readable (deny lists still win). TS missed this case only through an `isPathWithin` quirk.
+3. The bash 5 corpus rerun moves to P3, since it needs brush built in CI.
 
 Rows pv-*, cv-5, cv-7 and pd-13 to pd-15 stay skipped. They cover `external`, which is out of scope.
 
@@ -83,6 +81,7 @@ Exit check: the differential shows no unexplained diffs, and `tests/bugs` analyz
 - **(mech)** Build the command-spec table and its tests from man pages.
 - Write the argv rules engine.
 - Open the upstream PRs for `check_open` and `wait <pid>`.
+- **(mech)** Commit the engine corpus and run it against bash 5 on Linux and macOS in CI.
 
 Exit check: the hook-coverage suite and the engine conformance corpus pass. `xargs rm` and `find -exec rm` are caught.
 

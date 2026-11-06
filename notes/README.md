@@ -18,4 +18,4 @@ The TS repo is at `~/dev/safesh`. Port sources live there under `src/core`, `src
 ## Status (2026-11-05)
 
 - P0 spike: done and passed.
-- P1 policy core: in progress. The workspace and CI are scaffolded. The policy code is not written yet. See `plan.md` for next steps.
+- P1 policy core: exit check met. `safesh-policy` has config, paths, project root, scratchpad, session and pending state, and the `deno_permissions` facade, with 273 tests. See `plan.md` for the few items left.
