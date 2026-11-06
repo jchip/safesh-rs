@@ -21,4 +21,4 @@ The TS repo is at `~/dev/safesh`. Port sources live there under `src/core`, `src
 
 ## Status (2026-11-05)
 
-Alpha complete. The `safesh` binary runs the hook, the pre-check, the embedded bash engine with runtime gates, retry, and install for Claude, Codex and agy. 637 tests pass. Next is a two-week shadow-mode run next to the TS hook (P5). Open items are listed in `plan.md`.
+Alpha complete. The `safesh` binary runs the hook, the pre-check, the embedded bash engine with runtime gates, retry, and install for Claude, Codex and agy. 692 tests pass. Next is a two-week shadow-mode run next to the TS hook (P5). Open items are listed in `plan.md`.

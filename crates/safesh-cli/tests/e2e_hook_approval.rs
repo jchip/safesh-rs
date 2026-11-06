@@ -62,6 +62,16 @@ impl T {
     }
 
     fn hook_with(&self, args: &[&str], command: &str, session: &str, env: &[(&str, &str)]) -> Hook {
+        wait_hook(self.spawn_hook(args, command, session, env))
+    }
+
+    fn spawn_hook(
+        &self,
+        args: &[&str],
+        command: &str,
+        session: &str,
+        env: &[(&str, &str)],
+    ) -> std::process::Child {
         let mut c = self.e.safesh(args);
         c.env_remove("SAFESH_APPROVAL")
             .env("SAFESH_TEST_BIN_DIRS", &self.bin)
@@ -82,18 +92,22 @@ impl T {
             .unwrap()
             .write_all(self.e.input(command, session).as_bytes())
             .unwrap();
-        let o = child.wait_with_output().unwrap();
-        let stdout = String::from_utf8_lossy(&o.stdout).into_owned();
-        Hook {
-            code: o.status.code().unwrap_or(-1),
-            json: serde_json::from_str(&stdout).ok(),
-            stdout,
-            stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
-        }
+        child
     }
 
     fn hook(&self, command: &str) -> Hook {
         self.hook_with(&["hook", "claude"], command, "s1", &[])
+    }
+}
+
+fn wait_hook(child: std::process::Child) -> Hook {
+    let o = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&o.stdout).into_owned();
+    Hook {
+        code: o.status.code().unwrap_or(-1),
+        json: serde_json::from_str(&stdout).ok(),
+        stdout,
+        stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
     }
 }
 
@@ -292,6 +306,24 @@ fn budget_cuts_a_slow_popup() {
         "{:?}",
         start.elapsed()
     );
+}
+
+// Claude Code ran parallel hooks one after another in a live test, so this checks the queue directly.
+#[test]
+fn parallel_hooks_show_one_popup_at_a_time() {
+    let t = T::new("1\n");
+    let slow = [("FAKE_DELAY", "0.5")];
+    let a = t.spawn_hook(&["hook", "claude"], TOOL, "s1", &slow);
+    let b = t.spawn_hook(&["hook", "claude"], TOOL, "s1", &slow);
+    let (a, b) = (wait_hook(a), wait_hook(b));
+    let (pa, pb) = (
+        arg_of(&a.command(), "--pending"),
+        arg_of(&b.command(), "--pending"),
+    );
+    assert_ne!(pa, pb);
+    let log = t.log();
+    let popups: Vec<&str> = log.lines().filter(|l| *l != "close").collect();
+    assert_eq!(popups, ["start", "end", "start", "end"], "log: {log}");
 }
 
 #[test]

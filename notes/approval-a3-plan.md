@@ -58,7 +58,25 @@ Hard denials (deny lists, deny rules) never ask. Session without a session id be
 
 ## Results
 
-- 14 e2e tests in `tests/e2e_hook_approval.rs` cover every answer, no answer, `SAFESH_APPROVAL=off`, shadow, hard denials, a path write, a wrong-script once-grant, the budget cut, and the default budget. The workspace has 691 passing tests.
+- 15 e2e tests in `tests/e2e_hook_approval.rs` cover every answer, no answer, `SAFESH_APPROVAL=off`, shadow, hard denials, a path write, a wrong-script once-grant, the budget cut, the default budget, and two parallel hooks. The workspace has 692 passing tests.
+- The parallel test starts two hook processes at once with a slow fake popup. It checks that the popups never overlap. It fails when the queue is disabled.
 - Path reads outside the workspace are allowed by default, so the path test uses a write.
 - The shared test helper sets `SAFESH_APPROVAL=off`, so other tests never open a real dialog. Before this, the hook found `/usr/bin/osascript` during tests and opened real macOS dialogs.
 - An agent can type `safesh run --id <script> --pending <id>`, and the pre-check allows it. It only works when the user approved that exact script in a popup. The grant is single-use, and the hook's own rewrite uses it right away. The pending id the agent sees in a text menu never has a grant. So the worst case is one run of a script the user already approved.
+
+## Live test (2026-11-06)
+
+Claude Code in a throwaway project ran only the Rust hook with `--budget-sec 590`. Every step behaved as expected.
+
+| Step | Popup answer | Result |
+|---|---|---|
+| `uuidgen` | once | ran |
+| `uuidgen` again | deny | "DENIED by the user", no menu |
+| `sw_vers` | session | ran |
+| `sw_vers` again | none | ran, no popup, hook took 35 ms |
+| `caffeinate -t 1` | ignored | text menu after 60 s |
+| `uuidgen` and `caffeinate -t 1` in parallel | once, once | second popup only after the first answer |
+
+- Once-grants are used up. The parallel `uuidgen` asked again.
+- A timeout saves nothing. The parallel `caffeinate` asked again.
+- Claude Code ran the two parallel PreToolUse hooks one after another. The pending ids (`<millis>-<pid>`) show that the second hook process started after the first one returned. So the live run did not test the prompt queue. The parallel e2e test covers it.
