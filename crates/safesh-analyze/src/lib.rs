@@ -6,6 +6,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+mod builtins;
+mod control;
+mod path;
+mod scan;
+mod walk;
+mod words;
+
 pub use safesh_policy::effect::Access;
 
 #[derive(Debug, thiserror::Error)]
@@ -84,4 +91,23 @@ pub struct Analysis {
     pub final_cwd: Option<PathBuf>,
     /// True when the script may change cwd (`cd`, `pushd`, `popd`, `source`, `eval`, or an unknown command name).
     pub may_change_cwd: bool,
+}
+
+/// Walk `script` and list what it would run and open. Nothing is executed.
+///
+/// Only a parse error fails. Constructs the walk can't follow become `Unknown` values.
+pub fn analyze(script: &str, opts: &AnalyzeOptions) -> Result<Analysis, AnalyzeError> {
+    let mut w = walk::Walker::new(opts);
+    let prog =
+        walk::parse_script(script, &w.popts).map_err(|e| AnalyzeError::Parse(e.to_string()))?;
+    w.program(&prog);
+    Ok(w.finish())
+}
+
+/// True when `script` contains a control-plane call (`safesh run --id`, `safesh retry`,
+/// `safesh retry-path`, or the same under `desh` for retry), possibly behind leading
+/// assignments, `&&`, `||`, `|`, `;`, a subshell or a brace group.
+#[must_use]
+pub fn is_control_plane(script: &str) -> bool {
+    control::is_control_plane(script)
 }

@@ -12,3 +12,6 @@ workspace = true
 brush-parser.workspace = true
 safesh-policy = { path = "../safesh-policy" }
 thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
