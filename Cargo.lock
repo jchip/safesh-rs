@@ -1802,6 +1802,7 @@ dependencies = [
  "safesh-policy",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
 ]
 
