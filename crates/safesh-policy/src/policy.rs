@@ -4,6 +4,7 @@
 //! Run decisions follow TS `checkCommandPermission`, except a path command must resolve to an allowed
 //! program (D2) instead of matching by basename.
 
+mod commands;
 mod load;
 mod sys;
 
@@ -26,6 +27,9 @@ use crate::paths::{
 use crate::project::normalize_workspace_roots;
 use sys::HostSys;
 
+pub use commands::{
+    MultiCommandResult, candidate_cwds, check_command_allowed_in_any_cwd, check_multiple_commands,
+};
 pub use load::{LoadedSession, load_session_config, merge_session_permissions};
 
 #[derive(Debug, thiserror::Error)]
