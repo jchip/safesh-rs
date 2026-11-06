@@ -70,7 +70,8 @@ fn cl_12_project_run_plus_local() {
 }
 
 #[test]
-fn cl_3_and_14_mirror_local_object_entries() {
+fn cl_3_and_14_local_json_ignores_object_entries() {
+    // TS loadConfig keeps only string entries from config.local.json.
     let t = TempDir::new().unwrap();
     let env = host(t.path());
     write(
@@ -79,14 +80,17 @@ fn cl_3_and_14_mirror_local_object_entries() {
     );
     let out = load_config(t.path(), None, &env).unwrap();
     let run = run_of(&out.config);
-    for c in ["mk", "gitx", "./scripts/build.sh"] {
-        assert!(run.contains(&c.to_string()), "missing {c}");
+    assert!(run.contains(&"mk".to_string()));
+    for c in ["gitx", "./scripts/build.sh", "build"] {
+        assert!(!run.contains(&c.to_string()), "unexpected {c}");
     }
-    assert!(
-        out.warnings
-            .iter()
-            .any(|w| w.contains("subcommand limits for 'gitx'"))
-    );
+    for c in ["'gitx'", "'build'"] {
+        assert!(
+            out.warnings
+                .iter()
+                .any(|w| w.contains("ignored object entry") && w.contains(c))
+        );
+    }
 }
 
 #[test]

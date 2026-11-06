@@ -129,8 +129,8 @@ pub struct LocalConfig {
 }
 
 impl LocalConfig {
-    /// Convert `allowedCommands` into `permissions.run`. Returns the config (if any command)
-    /// and warnings for entries that lose detail.
+    /// Convert `allowedCommands` into `permissions.run`. Only plain strings count, as in TS.
+    /// Object entries came from `config.local.ts` and are ignored with a warning.
     #[must_use]
     pub fn to_config(&self, label: &str) -> (Option<Config>, Vec<String>) {
         let mut run: Vec<String> = Vec::new();
@@ -138,19 +138,12 @@ impl LocalConfig {
         for entry in self.allowed_commands.iter().flatten() {
             match entry {
                 AllowedCommand::Name(name) => run.push(name.clone()),
-                AllowedCommand::Named { path, .. } => run.push(path.clone()),
-                AllowedCommand::Command {
-                    command,
-                    subcommands,
-                    ..
-                } => {
-                    if subcommands.as_ref().is_some_and(|s| !s.is_empty()) {
-                        warnings.push(format!(
-                            "{label}: subcommand limits for '{command}' are not enforced; the whole command is allowed"
-                        ));
-                    }
-                    run.push(command.clone());
-                }
+                AllowedCommand::Named { name, .. } => warnings.push(format!(
+                    "{label}: ignored object entry '{name}'; only plain command strings are allowed"
+                )),
+                AllowedCommand::Command { command, .. } => warnings.push(format!(
+                    "{label}: ignored object entry '{command}'; only plain command strings are allowed"
+                )),
             }
         }
         if run.is_empty() {
