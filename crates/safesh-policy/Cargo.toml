@@ -12,6 +12,15 @@ workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+deno_permissions.workspace = true
+sys_traits.workspace = true
+shellexpand.workspace = true
+path-absolutize.workspace = true
+soft-canonicalize.workspace = true
+etcetera.workspace = true
+rustix.workspace = true
+fs-err.workspace = true
+serde_path_to_error.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
