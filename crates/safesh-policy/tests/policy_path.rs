@@ -295,3 +295,21 @@ fn perm_13_existing_home_dot_dirs_are_writable() {
     assert!(write_access(&p, &dot.join("x"), &cwd).is_allow());
     assert_ask(&write_access(&p, &f.host.home.join("plain/x"), &cwd));
 }
+
+#[test]
+fn device_paths_need_no_grant() {
+    let f = fx();
+    let cwd = f.root.join("elsewhere");
+    let p = policy(&Default::default(), &cwd, &f.host);
+    for d in [
+        "/dev/null",
+        "/dev/stderr",
+        "/dev/stdout",
+        "/dev/fd/2",
+        "/dev/tty",
+    ] {
+        assert!(read(&p, Path::new(d), &cwd).is_allow(), "read {d}");
+        assert!(write_access(&p, Path::new(d), &cwd).is_allow(), "write {d}");
+    }
+    assert_ask(&write_access(&p, Path::new("/dev/disk0"), &cwd));
+}

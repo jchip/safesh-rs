@@ -170,6 +170,7 @@ pub struct Policy {
     run_set: BTreeSet<String>,
     allow_project_commands: bool,
     rules: Vec<crate::rules::Rule>,
+    session_id: Option<String>,
 }
 
 impl Policy {
@@ -229,6 +230,7 @@ impl Policy {
                 .chain(["safesh".to_string()])
                 .collect(),
             rules: config.rules.clone().unwrap_or_default(),
+            session_id: opts.session_id.clone(),
             allow_project_commands: config
                 .allow_project_commands
                 .unwrap_or(opts.session_id.is_some()),
@@ -253,6 +255,9 @@ impl Policy {
             &self.host,
         );
         let real = resolve_path(Path::new(&expanded), cwd);
+        if is_device(Path::new(&expanded)) || is_device(&real) {
+            return Decision::Allow { resolved: real };
+        }
         let state = match access {
             Access::Read => self.deno.query_read(&real),
             Access::Write => self.deno.query_write(&real),
@@ -303,7 +308,10 @@ impl Policy {
 
         let cwd_s = cwd.to_string_lossy();
         let abs = resolve_lexical(&cwd_s, command);
-        if self.deno.query_run(&abs) == State::Granted || self.is_resolved_allowed_name(&abs, cwd) {
+        if self.deno.query_run(&abs) == State::Granted
+            || self.is_resolved_allowed_name(&abs, cwd)
+            || self.is_scratchpad_script(&abs)
+        {
             return allow(&abs);
         }
 
@@ -356,6 +364,15 @@ impl Policy {
         .is_ok_and(|found| found == Path::new(abs))
     }
 
+    /// Scripts in this agent session's own scratchpad are trusted, as in TS. A script the same
+    /// command is about to write counts too.
+    fn is_scratchpad_script(&self, abs: &str) -> bool {
+        let sid = self.session_id.as_deref();
+        let uid = Some(self.host.uid);
+        crate::scratchpad::is_session_scratchpad_script(abs, sid, uid)
+            || crate::scratchpad::is_new_session_scratchpad_script(abs, sid, uid)
+    }
+
     fn within_roots(&self, path: &str, cwd: &Path) -> bool {
         let cwd_s = cwd.to_string_lossy();
         let path = resolve_lexical(&cwd_s, path);
@@ -363,6 +380,26 @@ impl Policy {
             .iter()
             .any(|root| is_path_within(&path, &resolve_lexical(&cwd_s, root)))
     }
+}
+
+/// Streams and terminal devices that hold no data, so bash redirects to them need no grant.
+fn is_device(path: &Path) -> bool {
+    const DEVICES: &[&str] = &[
+        "/dev/null",
+        "/dev/stdin",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/tty",
+        "/dev/zero",
+        "/dev/random",
+        "/dev/urandom",
+    ];
+    let Some(p) = path.to_str() else {
+        return false;
+    };
+    DEVICES.contains(&p)
+        || p.strip_prefix("/dev/fd/")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn not_found(command: &str) -> Decision {
