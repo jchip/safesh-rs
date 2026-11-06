@@ -1,0 +1,17 @@
+[package]
+name = "brush-policy-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Spike only. Path deps point at a local brush clone with the check_open patch
+# applied (see README.md).
+[dependencies]
+brush-core = { path = "../../.temp/brush-spike/brush/brush-core" }
+brush-builtins = { path = "../../.temp/brush-spike/brush/brush-builtins" }
+tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "macros"] }
+
+[workspace]
+
+[profile.release]
+debug = false

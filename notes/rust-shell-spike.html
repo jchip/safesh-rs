@@ -1,0 +1,402 @@
+<title>Rust Safesh Spike</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one narrow reading column; each section = one big diagram + a few lines. Rust-orange = new runner, steel-blue = OS sandbox. */
+:root {
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --fg: #18202a;
+  --muted: #5b6673;
+  --line: #cfd6de;
+  --rust: #c2410c;
+  --rust-soft: #fbe3d6;
+  --steel: #2f5d8a;
+  --steel-soft: #dbe7f3;
+  --ok: #2f7d4f;
+  --ok-soft: #dcefe3;
+  --bad: #b42318;
+  --bad-soft: #f9dcd9;
+  --f-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --f-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171d; --panel: #1a2129; --fg: #e6ebf0; --muted: #9aa6b2; --line: #2e3945;
+    --rust: #f07a45; --rust-soft: #3a2318; --steel: #7fb0e0; --steel-soft: #1c2c3d;
+    --ok: #6cc28f; --ok-soft: #173024; --bad: #f2867c; --bad-soft: #3a1c1a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171d; --panel: #1a2129; --fg: #e6ebf0; --muted: #9aa6b2; --line: #2e3945;
+  --rust: #f07a45; --rust-soft: #3a2318; --steel: #7fb0e0; --steel-soft: #1c2c3d;
+  --ok: #6cc28f; --ok-soft: #173024; --bad: #f2867c; --bad-soft: #3a1c1a;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 17px; line-height: 1.5; }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 56px; }
+h1, h2 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.05; }
+h2 { font-size: clamp(1.4rem, 3vw, 1.9rem); line-height: 1.15; }
+p { margin: 0; max-width: 64ch; }
+section { display: grid; gap: 16px; min-width: 0; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.15rem; color: var(--muted); }
+code, .mono { font-family: var(--f-mono); font-size: 0.88em; }
+.verdict { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.chip { border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; }
+.chip b { font-family: var(--f-display); font-size: 1.25rem; }
+.chip span { font-size: 0.95rem; }
+.chip.yes { background: var(--ok-soft); color: var(--fg); border: 1px solid var(--ok); }
+.chip.ru { background: var(--rust-soft); color: var(--fg); border: 1px solid var(--rust); }
+.chip.os { background: var(--steel-soft); color: var(--fg); border: 1px solid var(--steel); }
+.chip b.ok { color: var(--ok); } .chip b.r { color: var(--rust); } .chip b.st { color: var(--steel); }
+.fig { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; height: auto; min-width: 560px; }
+.cap { font-size: 0.92rem; color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.stat { border-top: 3px solid var(--line); padding-top: 8px; display: grid; gap: 2px; }
+.stat b { font-family: var(--f-display); font-size: 2rem; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat.hot { border-color: var(--rust); } .stat.hot b { color: var(--rust); }
+.stat span { font-size: 0.92rem; color: var(--muted); }
+.risks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.risk { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 4px; }
+.risk b { font-family: var(--f-display); font-size: 1rem; }
+.risk span { font-size: 0.94rem; }
+.risk .fix { color: var(--ok); font-size: 0.9rem; }
+.phases { display: grid; gap: 10px; }
+.phase { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 14px; align-items: start; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.phase .n { font-family: var(--f-display); font-weight: 700; font-size: 1.6rem; color: var(--rust); }
+.phase h3 { margin: 0 0 4px; font-family: var(--f-display); font-size: 1.1rem; }
+.phase p { font-size: 0.96rem; }
+.phase .check { color: var(--muted); font-size: 0.92rem; margin-top: 4px; }
+.phase.gate { border-color: var(--rust); }
+.tag { display: inline-block; font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: var(--rust-soft); color: var(--rust); margin-left: 6px; vertical-align: 2px; }
+ul.qs { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 64ch; }
+.src { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 4px; }
+.src a { color: var(--steel); }
+/* SVG classes, all from tokens */
+.s-box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+.s-rust { fill: var(--rust-soft); stroke: var(--rust); stroke-width: 1.5; }
+.s-steel { fill: var(--steel-soft); stroke: var(--steel); stroke-width: 1.5; }
+.s-steel-dash { fill: none; stroke: var(--steel); stroke-width: 2; stroke-dasharray: 7 5; }
+.s-bad { fill: var(--bad-soft); stroke: var(--bad); stroke-width: 1.5; }
+.s-ok { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.5; }
+.s-arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; }
+.s-head { fill: var(--muted); }
+.t { fill: var(--fg); font-family: var(--f-body); font-size: 14px; }
+.t-b { fill: var(--fg); font-family: var(--f-display); font-weight: 700; font-size: 15px; }
+.t-m { fill: var(--muted); font-family: var(--f-mono); font-size: 12px; }
+.t-rust { fill: var(--rust); font-family: var(--f-display); font-weight: 700; font-size: 14px; }
+.t-steel { fill: var(--steel); font-family: var(--f-display); font-weight: 700; font-size: 14px; }
+.t-bad { fill: var(--bad); font-family: var(--f-display); font-weight: 700; font-size: 14px; }
+.t-ok { fill: var(--ok); font-family: var(--f-display); font-weight: 700; font-size: 14px; }
+.bar-gone { fill: var(--ok); } .bar-up { fill: var(--steel); } .bar-ours { fill: var(--rust); }
+.grid { stroke: var(--line); stroke-width: 1; }
+@media (max-width: 640px) {
+  .verdict, .stats, .risks { grid-template-columns: minmax(0, 1fr); }
+  .phase { grid-template-columns: 40px minmax(0, 1fr); }
+}
+</style>
+
+<div class="wrap">
+
+<header style="display:grid;gap:14px">
+  <div class="eyebrow">safesh · spike · 2026-11-05</div>
+  <h1>Should safesh become a Rust bash runner?</h1>
+  <p class="lede">The new safesh would be a non-interactive bash runner written in Rust. It parses bash and runs commands directly, with permissions and sandboxing built in. It drops the transpile to TypeScript and reuses existing code wherever it can.</p>
+</header>
+
+<section>
+  <div class="eyebrow">The short answer</div>
+  <div class="verdict">
+    <div class="chip yes"><b class="ok">Worth it: yes</b><span>It removes the layer that causes most of today's bugs.</span></div>
+    <div class="chip ru"><b class="r">Reuse brush</b><span>A Rust bash engine with an exec hook already exists. Embed it.</span></div>
+    <div class="chip os"><b class="st">Sandbox at OS level</b><span>A shell can't see what its children run. The kernel sees all of it.</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">1 · Where safesh is today</div>
+  <h2>Two paths, and neither one is sandboxed by the OS</h2>
+  <div class="fig">
+    <svg viewBox="0 0 760 230" role="img" aria-label="Today: agent command goes through the safesh hook, then either real bash or transpile to TypeScript on Deno">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="s-head"/></marker></defs>
+      <rect x="10" y="85" width="120" height="60" rx="8" class="s-box"/>
+      <text x="70" y="112" text-anchor="middle" class="t-b">Agent</text>
+      <text x="70" y="131" text-anchor="middle" class="t-m">bash string</text>
+      <path d="M130 115 H185" class="s-arrow" marker-end="url(#ah)"/>
+      <rect x="190" y="75" width="150" height="80" rx="8" class="s-box"/>
+      <text x="265" y="105" text-anchor="middle" class="t-b">safesh hook</text>
+      <text x="265" y="125" text-anchor="middle" class="t-m">parse + check</text>
+      <text x="265" y="142" text-anchor="middle" class="t-m">commands, paths</text>
+      <path d="M340 100 C380 100 380 50 420 50" class="s-arrow" marker-end="url(#ah)"/>
+      <path d="M340 130 C380 130 380 180 420 180" class="s-arrow" marker-end="url(#ah)"/>
+      <rect x="425" y="20" width="325" height="62" rx="8" class="s-ok"/>
+      <text x="440" y="45" class="t-b">Passthrough → real bash</text>
+      <text x="440" y="66" class="t">Analyzable and allowed. Correct, but no OS sandbox.</text>
+      <rect x="425" y="148" width="325" height="62" rx="8" class="s-bad"/>
+      <text x="440" y="173" class="t-b">Transpile → TypeScript → Deno</text>
+      <text x="440" y="194" class="t">Emulated shell. This is where the bugs come from.</text>
+    </svg>
+  </div>
+  <div class="stats">
+    <div class="stat hot"><b>~40k</b><span>lines of TS that emulate a shell: parser, transpiler, coreutils</span></div>
+    <div class="stat hot"><b>~1 in 3</b><span>commits since June are bash emulation fixes (40 to 55 of 156)</span></div>
+    <div class="stat"><b>0</b><span>lines of Seatbelt or Landlock code. The OS sandbox exists only in design notes.</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">2 · What agents actually write</div>
+  <h2>Plain bash: pipes, chains, loops and heredocs. Almost no zsh.</h2>
+  <div class="fig">
+    <svg viewBox="0 0 760 330" role="img" aria-label="Share of 15,831 agent Bash commands using each feature">
+      <!-- scale: 0..80% -> 0..400px from x=200 -->
+      <line x1="200" y1="14" x2="200" y2="296" class="grid"/>
+      <line x1="300" y1="14" x2="300" y2="296" class="grid"/>
+      <line x1="400" y1="14" x2="400" y2="296" class="grid"/>
+      <line x1="500" y1="14" x2="500" y2="296" class="grid"/>
+      <line x1="600" y1="14" x2="600" y2="296" class="grid"/>
+      <text x="200" y="314" text-anchor="middle" class="t-m">0%</text>
+      <text x="300" y="314" text-anchor="middle" class="t-m">20%</text>
+      <text x="400" y="314" text-anchor="middle" class="t-m">40%</text>
+      <text x="500" y="314" text-anchor="middle" class="t-m">60%</text>
+      <text x="600" y="314" text-anchor="middle" class="t-m">80%</text>
+      <text x="190" y="34" text-anchor="end" class="t">pipelines</text>
+      <rect x="200" y="20" width="368" height="20" rx="3" class="bar-up"/><text x="576" y="35" class="t-m">73.6%</text>
+      <text x="190" y="64" text-anchor="end" class="t">&amp;&amp; / ||</text>
+      <rect x="200" y="50" width="228" height="20" rx="3" class="bar-up"/><text x="436" y="65" class="t-m">45.6%</text>
+      <text x="190" y="94" text-anchor="end" class="t">2&gt;&amp;1</text>
+      <rect x="200" y="80" width="90" height="20" rx="3" class="bar-up"/><text x="298" y="95" class="t-m">18.0%</text>
+      <text x="190" y="124" text-anchor="end" class="t">for / while</text>
+      <rect x="200" y="110" width="87" height="20" rx="3" class="bar-up"/><text x="295" y="125" class="t-m">17.4%</text>
+      <text x="190" y="154" text-anchor="end" class="t">heredocs</text>
+      <rect x="200" y="140" width="77.5" height="20" rx="3" class="bar-up"/><text x="285" y="155" class="t-m">15.5%</text>
+      <text x="190" y="184" text-anchor="end" class="t">$( … )</text>
+      <rect x="200" y="170" width="25" height="20" rx="3" class="bar-up"/><text x="233" y="185" class="t-m">5.0%</text>
+      <text x="190" y="214" text-anchor="end" class="t">subshells</text>
+      <rect x="200" y="200" width="13.5" height="20" rx="3" class="bar-up"/><text x="221" y="215" class="t-m">2.7%</text>
+      <text x="190" y="244" text-anchor="end" class="t">functions</text>
+      <rect x="200" y="230" width="12" height="20" rx="3" class="bar-up"/><text x="220" y="245" class="t-m">2.4%</text>
+      <text x="190" y="274" text-anchor="end" class="t-rust">zsh-only syntax</text>
+      <rect x="200" y="260" width="1.5" height="20" rx="1" class="bar-ours"/><text x="210" y="275" class="t-rust">2 of 15,831 commands</text>
+    </svg>
+  </div>
+  <p class="cap">From 541 local Claude Code transcripts. Commands run under zsh on this Mac, yet agents write bash and POSIX. Edge cases to test: unquoted <code>$var</code> word splitting (22 uses), <code>&lt;( … )</code> (92 uses) and unmatched globs.</p>
+</section>
+
+<section>
+  <div class="eyebrow">3 · Where today's bugs would go</div>
+  <h2>Most bug classes disappear, and the rest move to a shared engine</h2>
+  <div class="fig">
+    <svg viewBox="0 0 760 300" role="img" aria-label="Bash fix taxonomy from the June review, grouped by what happens to each class in a Rust runner built on brush">
+      <!-- scale: 0..40 fixes -> 0..400px from x=250 -->
+      <line x1="250" y1="16" x2="250" y2="262" class="grid"/>
+      <line x1="350" y1="16" x2="350" y2="262" class="grid"/>
+      <line x1="450" y1="16" x2="450" y2="262" class="grid"/>
+      <line x1="550" y1="16" x2="550" y2="262" class="grid"/>
+      <line x1="650" y1="16" x2="650" y2="262" class="grid"/>
+      <text x="250" y="280" text-anchor="middle" class="t-m">0</text>
+      <text x="350" y="280" text-anchor="middle" class="t-m">10</text>
+      <text x="450" y="280" text-anchor="middle" class="t-m">20</text>
+      <text x="550" y="280" text-anchor="middle" class="t-m">30</text>
+      <text x="650" y="280" text-anchor="middle" class="t-m">40 fixes</text>
+      <text x="240" y="38" text-anchor="end" class="t">coreutils emulation</text>
+      <rect x="250" y="24" width="380" height="20" rx="3" class="bar-gone"/>
+      <text x="240" y="68" text-anchor="end" class="t">lowering to TS</text>
+      <rect x="250" y="54" width="300" height="20" rx="3" class="bar-gone"/>
+      <text x="240" y="98" text-anchor="end" class="t">value coercion</text>
+      <rect x="250" y="84" width="140" height="20" rx="3" class="bar-gone"/>
+      <text x="240" y="138" text-anchor="end" class="t">lex / parse</text>
+      <rect x="250" y="124" width="220" height="20" rx="3" class="bar-up"/>
+      <text x="240" y="168" text-anchor="end" class="t">expansion</text>
+      <rect x="250" y="154" width="180" height="20" rx="3" class="bar-up"/>
+      <text x="240" y="198" text-anchor="end" class="t">builtins</text>
+      <rect x="250" y="184" width="90" height="20" rx="3" class="bar-up"/>
+      <text x="240" y="238" text-anchor="end" class="t">permission / env</text>
+      <rect x="250" y="224" width="80" height="20" rx="3" class="bar-ours"/>
+      <text x="640" y="68" class="t-ok">Gone: real tools</text>
+      <text x="640" y="86" class="t-ok">and a real interpreter</text>
+      <text x="480" y="160" class="t-steel">Moved to brush,</text>
+      <text x="480" y="178" class="t-steel">shared with 2,500 tests</text>
+      <text x="340" y="239" class="t-rust">Still ours</text>
+    </svg>
+  </div>
+  <p class="cap">Counts are about 135 bash fixes from six months of git history, taken from the June architecture review.</p>
+</section>
+
+<section>
+  <div class="eyebrow">4 · What we reuse</div>
+  <h2>We write the glue. Others already wrote the shell and the sandbox.</h2>
+  <div class="fig">
+    <svg viewBox="0 0 760 290" role="img" aria-label="Reuse map: brush-core, codex-rs and current safesh feed into the new Rust runner">
+      <defs><marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="s-head"/></marker></defs>
+      <rect x="10" y="16" width="300" height="74" rx="10" class="s-box"/>
+      <text x="28" y="42" class="t-b">brush-core · MIT</text>
+      <text x="28" y="62" class="t">bash parser, expansion, interpreter,</text>
+      <text x="28" y="80" class="t">builtins, ProcessLauncher hook</text>
+      <rect x="10" y="106" width="300" height="74" rx="10" class="s-box"/>
+      <text x="28" y="132" class="t-b">codex-rs · Apache-2.0</text>
+      <text x="28" y="152" class="t">Seatbelt and Landlock sandboxes,</text>
+      <text x="28" y="170" class="t">network proxy, exec policy</text>
+      <rect x="10" y="196" width="300" height="74" rx="10" class="s-box"/>
+      <text x="28" y="222" class="t-b">safesh today · port</text>
+      <text x="28" y="242" class="t">permission model, approvals, retry</text>
+      <text x="28" y="260" class="t">flow, Claude/Codex/agy hooks, MCP</text>
+      <path d="M310 53 C360 53 370 140 420 140" class="s-arrow" marker-end="url(#ah3)"/>
+      <path d="M310 143 H420" class="s-arrow" marker-end="url(#ah3)"/>
+      <path d="M310 233 C360 233 370 146 420 146" class="s-arrow" marker-end="url(#ah3)"/>
+      <rect x="425" y="70" width="325" height="150" rx="12" class="s-rust"/>
+      <text x="445" y="100" class="t-b">safesh (Rust)</text>
+      <text x="445" y="126" class="t">New code we write:</text>
+      <text x="445" y="148" class="t-m">· PolicyLauncher   ~150–250 LOC</text>
+      <text x="445" y="168" class="t-m">· redirect + builtin gate</text>
+      <text x="445" y="188" class="t-m">· sandbox profile from config</text>
+      <text x="445" y="208" class="t-m">· CLI + session glue</text>
+    </svg>
+  </div>
+  <p>Matching bash costs years. Oils spent 9+ years on it, and brush runs 2,500+ test cases against real bash. Reusing brush means that work is already done.</p>
+</section>
+
+<section>
+  <div class="eyebrow">5 · What owning the interpreter buys</div>
+  <h2>Exact argv at exec time, so the policy never has to guess</h2>
+  <div class="fig">
+    <svg viewBox="0 0 760 200" role="img" aria-label="Static analysis guesses x=rm; $x foo; a runtime hook sees argv rm foo exactly">
+      <rect x="10" y="20" width="360" height="160" rx="10" class="s-box"/>
+      <text x="30" y="48" class="t-b">Today: static parse</text>
+      <text x="30" y="80" class="t-m">x=rm; [ -n "$y" ] &amp;&amp; x=ls; $x foo</text>
+      <text x="30" y="112" class="t">Analyzer must work out what $x might be.</text>
+      <text x="30" y="134" class="t">Every new bash trick is a new bug.</text>
+      <text x="30" y="160" class="t-bad">Example: SSH-746 (last commit)</text>
+      <rect x="390" y="20" width="360" height="160" rx="10" class="s-rust"/>
+      <text x="410" y="48" class="t-b">Rust runner: exec hook</text>
+      <text x="410" y="80" class="t-m">check(argv=["rm","foo"], cwd=/repo)</text>
+      <text x="410" y="112" class="t">Hook runs after expansion.</text>
+      <text x="410" y="134" class="t">It sees real values. Nothing to guess.</text>
+      <text x="410" y="160" class="t-rust">Precise prompts: "allow rm foo?"</text>
+    </svg>
+  </div>
+  <p>Every external command in <code>brush-core</code> goes through one <code>ProcessLauncher</code> trait. Its docs name sandboxing as a use case. Loops, <code>$( )</code>, pipelines and subshells all run in-process and share that one gate.</p>
+  <div class="stats">
+    <div class="stat hot"><b>0</b><span>lines to patch in brush. The hook point is a public trait.</span></div>
+    <div class="stat hot"><b>1</b><span>live Shell object per session, holding cwd, env and vars. No state-marker round trip.</span></div>
+    <div class="stat"><b>126</b><span>exit status when the launcher denies a command, as in bash</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">6 · Why the OS sandbox is still required</div>
+  <h2>A shell only sees the first exec, but agents spawn whole process trees</h2>
+  <div class="fig">
+    <svg viewBox="0 0 760 270" role="img" aria-label="Process tree: shell hook sees make; the rm launched by sh inside make is invisible to the shell but inside the OS sandbox">
+      <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="s-head"/></marker></defs>
+      <rect x="14" y="14" width="732" height="242" rx="14" class="s-steel-dash"/>
+      <text x="30" y="40" class="t-steel">OS sandbox (Seatbelt / Landlock): covers every process below</text>
+      <rect x="40" y="70" width="150" height="56" rx="8" class="s-rust"/>
+      <text x="115" y="95" text-anchor="middle" class="t-b">Rust runner</text>
+      <text x="115" y="113" text-anchor="middle" class="t-m">policy hook</text>
+      <path d="M190 98 H245" class="s-arrow" marker-end="url(#ah2)"/>
+      <rect x="250" y="70" width="140" height="56" rx="8" class="s-ok"/>
+      <text x="320" y="95" text-anchor="middle" class="t-b">make test</text>
+      <text x="320" y="113" text-anchor="middle" class="t-m">hook sees this ✓</text>
+      <path d="M390 98 H445" class="s-arrow" marker-end="url(#ah2)"/>
+      <rect x="450" y="70" width="120" height="56" rx="8" class="s-box"/>
+      <text x="510" y="103" text-anchor="middle" class="t-b">sh -c …</text>
+      <path d="M570 98 C610 98 600 180 640 180" class="s-arrow" marker-end="url(#ah2)"/>
+      <rect x="560" y="160" width="170" height="56" rx="8" class="s-bad"/>
+      <text x="645" y="185" text-anchor="middle" class="t-b">rm -rf ~/work</text>
+      <text x="645" y="203" text-anchor="middle" class="t-m">hook never sees this ✗</text>
+      <text x="40" y="190" class="t">Same story for xargs, find -exec, python and git hooks.</text>
+      <text x="40" y="212" class="t">Only the kernel can stop the write to ~/work.</text>
+    </svg>
+  </div>
+  <p>The hook gives good prompts. The sandbox gives real safety. We need both.</p>
+</section>
+
+<section>
+  <div class="eyebrow">7 · Recommended shape</div>
+  <h2>Three layers, each doing one job</h2>
+  <div class="fig">
+    <svg viewBox="0 0 760 330" role="img" aria-label="Layered architecture: agent integrations, policy and approvals, brush interpreter with exec hook, OS sandbox with network proxy">
+      <rect x="20" y="16" width="720" height="58" rx="10" class="s-box"/>
+      <text x="40" y="42" class="t-b">Agent integrations</text>
+      <text x="40" y="62" class="t">Claude Code hook · Codex hook · agy · MCP. Hook rewrites a command to run in the Rust runner.</text>
+      <rect x="20" y="88" width="720" height="58" rx="10" class="s-box"/>
+      <text x="40" y="114" class="t-b">Policy + approvals</text>
+      <text x="40" y="134" class="t">Config, session/project/global grants, retry flow. Ported from today's ~15k LOC.</text>
+      <rect x="20" y="160" width="720" height="70" rx="10" class="s-rust"/>
+      <text x="40" y="188" class="t-b">Interpreter: brush-core + PolicyLauncher + redirect gate</text>
+      <text x="40" y="210" class="t">Real bash semantics. Exact argv, cwd and target paths. Runs real coreutils.</text>
+      <rect x="20" y="244" width="720" height="70" rx="10" class="s-steel"/>
+      <text x="40" y="272" class="t-steel">OS sandbox (the hard boundary)</text>
+      <text x="40" y="294" class="t">Seatbelt on macOS · Landlock + seccomp or bwrap on Linux · deny-all net + domain proxy</text>
+    </svg>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">8 · Risks</div>
+  <div class="risks">
+    <div class="risk"><b>brush is 0.x</b><span>The API can change between releases.</span><span class="fix">Pin the version. Wrap it behind one adapter module.</span></div>
+    <div class="risk"><b>~470 known failures</b><span>brush marks about 470 of its 2,500 test cases as failing.</span><span class="fix">Run our field-issue corpus in the spike. Fix gaps upstream.</span></div>
+    <div class="risk"><b>Writes without exec</b><span><code>&gt; file</code>, <code>cd</code>, <code>source</code> and <code>mapfile</code> skip the launcher.</span><span class="fix">Add a redirect and builtin gate. The sandbox catches the rest.</span></div>
+    <div class="risk"><b>Wrapper programs</b><span><code>bash -c</code>, <code>xargs</code> and <code>find -exec</code> hide the real command.</span><span class="fix">Add rules for wrappers, as safesh has today. The sandbox is the backstop.</span></div>
+    <div class="risk"><b>Stateful launcher</b><span>The trait requires <code>Default</code>, so passing policy in needs care.</span><span class="fix">Use a shared Arc. Confirm in the spike that brush accepts a launcher instance.</span></div>
+    <div class="risk"><b>TS mode</b><span><code>/*#*/</code> TypeScript and the Deno stdlib don't fit a Rust runner.</span><span class="fix">Your call: keep Deno for TS mode only, or drop it.</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">9 · Plan with exit points</div>
+  <h2>Prove it on real commands before porting anything</h2>
+  <div class="phases">
+    <div class="phase">
+      <div class="n">P0</div>
+      <div><h3>Hands-on spike <span class="tag">needs your OK</span></h3>
+      <p>Build brush. Write a PolicyLauncher prototype. Replay our field-issue corpus through brush and bash, then compare.</p>
+      <p class="check">Exit point: brush matches bash on most of the corpus, and the hook catches <code>rm</code> in loops, <code>$( )</code>, <code>$x</code> and <code>eval</code>.</p></div>
+    </div>
+    <div class="phase">
+      <div class="n">P1</div>
+      <div><h3>Rust runner behind a flag</h3>
+      <p>brush plus the policy launcher plus Seatbelt. The current hook sends the transpile path to it when a flag is on. Policy is read from today's config files.</p>
+      <p class="check">Exit point: daily use for a few weeks with fewer bug reports than the transpiler.</p></div>
+    </div>
+    <div class="phase gate">
+      <div class="n">P2</div>
+      <div><h3>Make it the default, retire the transpiler <span class="tag">needs your sign-off</span></h3>
+      <p>Port policy and approvals to Rust. Delete about 40k lines of emulation. This changes existing behavior, so the migration plan is yours to approve.</p>
+      <p class="check">Exit point: approvals and the retry flow work across Claude Code, Codex and agy.</p></div>
+    </div>
+    <div class="phase">
+      <div class="n">P3</div>
+      <div><h3>Linux sandbox and upstream fixes</h3>
+      <p>Add Landlock and seccomp. Send brush fixes upstream. The maintainer has an open "safer shell" issue and seems open to this use case.</p>
+      <p class="check">Exit point: the same corpus passes on Linux.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">10 · Open questions for you</div>
+  <ul class="qs">
+    <li><b>TS mode:</b> keep <code>/*#*/</code> on Deno, or drop it?</li>
+    <li><b>Platforms:</b> macOS first, or macOS and Linux together?</li>
+    <li><b>Positioning:</b> Claude Code <code>/sandbox</code> and Codex already ship OS sandboxes. Is safesh's edge per-command rules and one approval model across agents?</li>
+    <li><b>Spike:</b> P0 needs your OK to clone and build brush.</li>
+  </ul>
+</section>
+
+<footer class="src">
+  <div>Sources: <a href="https://github.com/reubeno/brush">brush</a> · <a href="https://oils.pub">Oils</a> · <a href="https://github.com/openai/codex">codex-rs</a> · <a href="https://github.com/anthropic-experimental/sandbox-runtime">sandbox-runtime</a> · safesh git history and notes/bash-architecture-review-2026-06.md</div>
+  <div>Raw research: .temp/research-rust-shells.md, .temp/research-sandbox.md, .temp/research-brush-source.md, .temp/research-agent-commands.md. brush facts come from reading source, not from a build.</div>
+</footer>
+
+</div>
