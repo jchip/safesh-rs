@@ -55,9 +55,17 @@ pub enum Reason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
     /// Allowed. Carries the resolved path the decision was made on.
-    Allow { resolved: PathBuf },
-    Ask { resolved: PathBuf, reason: Reason },
-    Deny { resolved: PathBuf, reason: Reason },
+    Allow {
+        resolved: PathBuf,
+    },
+    Ask {
+        resolved: PathBuf,
+        reason: Reason,
+    },
+    Deny {
+        resolved: PathBuf,
+        reason: Reason,
+    },
 }
 
 impl Decision {
