@@ -55,6 +55,7 @@ One consequence needs attention. Today, file safety for `rm`, `mv`, `cp`, `chmod
 - `permissions.run` defaults to the current 211-entry `SAFE_COMMANDS`.
 - Approvals at once, session, project and global scope work as today.
 - `allowProjectCommands` keeps running any file under the workspace roots.
+- `rm`, `rmdir`, `cp`, `mv`, `mkdir`, `touch`, `ln` and `chmod` stay allowed by name, as in TS, where they were sandboxed builtins. Their path arguments are checked through the command-spec table (4.3).
 - New: the check uses the **resolved program path**, not only the basename (D2). This closes today's gap where `/tmp/x/git` passes because `git` is allowed.
 
 ### 4.2 Argv rules (new)

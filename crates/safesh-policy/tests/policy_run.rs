@@ -312,3 +312,12 @@ fn cmd_26_no_session_file_not_allowed() {
     let p = Policy::new(&c, &home(), &f.host, &PolicyOptions::default()).unwrap();
     assert_ask(&p.check_run("curl", &home()));
 }
+
+#[test]
+fn path_checked_file_tools_are_allowed_by_name() {
+    let f = fx();
+    let p = policy(&Default::default(), &f.root, &f.host);
+    for c in ["rm", "cp", "mv", "mkdir", "touch", "ln", "chmod", "rmdir"] {
+        assert!(p.check_run(c, &f.root).is_allow(), "{c}");
+    }
+}

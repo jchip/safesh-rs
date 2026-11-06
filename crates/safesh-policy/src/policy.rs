@@ -141,6 +141,11 @@ fn dedupe(v: Vec<String>) -> Vec<String> {
     v.into_iter().filter(|s| seen.insert(s.clone())).collect()
 }
 
+/// File tools TS ran as sandboxed builtins, so they never needed run permission. They stay
+/// allowed by name; their path arguments are checked through the command-spec table.
+pub const PATH_CHECKED_COMMANDS: &[&str] =
+    &["rm", "rmdir", "cp", "mv", "mkdir", "touch", "ln", "chmod"];
+
 /// Options that come from the caller, not the config.
 #[derive(Debug, Clone, Default)]
 pub struct PolicyOptions {
@@ -212,7 +217,11 @@ impl Policy {
             roots,
             block_project_dir_write: block,
             explicit_write,
-            run_set: eff.run.into_iter().collect(),
+            run_set: eff
+                .run
+                .into_iter()
+                .chain(PATH_CHECKED_COMMANDS.iter().map(|c| (*c).to_string()))
+                .collect(),
             allow_project_commands: config
                 .allow_project_commands
                 .unwrap_or(opts.session_id.is_some()),
