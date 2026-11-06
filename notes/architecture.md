@@ -107,6 +107,13 @@ The core takes its I/O through injected traits: fs metadata for symlink and path
 
 The config maps onto it one to one, because TS safesh was built on Deno's flags. `permissions.read`/`denyRead`/`write`/`denyWrite`/`run`/`env` go to `PermissionsOptions`. That gives path-decision parity with today's TS safesh.
 
+How the facade uses it:
+- It builds a `PermissionsContainer` with `prompt: false` and only calls `query_*`. Granted, Prompt and Denied map to Allow, Ask and Deny.
+- Deno reads PATH, HOME and cwd through a `sys_traits` adapter over `HostEnv`, so tests inject them.
+- Deno matches paths lexically on both sides. The facade resolves every query path (symlinks included) and registers each list entry in lexical and canonical form.
+- Only explicit paths go into `allow_run`. Resolving 219 allowed names through PATH up front took about 34 ms. Instead, a path command is allowed when its basename is allowed and PATH resolves that name to the same path (D2). Setup is about 3 ms.
+- `blockProjectDirWrite` and project commands sit on top, in TS order.
+
 Costs and how we handle them:
 - Releases come often and break things. Pin an exact version and upgrade on purpose.
 - About 11.7k lines, including unused parts (ffi, import, sys). We leave those disabled.

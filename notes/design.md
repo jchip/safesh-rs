@@ -159,6 +159,9 @@ Partial side effects are possible in this case. The pre-check keeps it rare.
 | Check resolved program path, not basename (D2) | approved 2026-11-05 |
 | Key session grants by hook stdin `session_id`, not env `CLAUDE_SESSION_ID` (D3) | approved 2026-11-05 |
 | One choice numbering across all agents (D4) | approved 2026-11-05 |
+| Load path grants from `config.local.json` (TS wrote them on `retry-path` "always" but never read them) | approved 2026-11-05 |
+| Reject session and pending ids outside `[A-Za-z0-9_-]` | hardening; ids become file names |
+| Allow and deny entries match in lexical and canonical form; symlinks resolve for missing files too | hardening; deny under macOS `/tmp` no longer slips past |
 
 Any further change that breaks current behavior needs sign-off before it ships.
 
