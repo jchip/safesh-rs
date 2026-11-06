@@ -1796,10 +1796,12 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "rustix",
  "safesh-analyze",
  "safesh-exec",
  "safesh-hooks",
  "safesh-policy",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

@@ -1,6 +1,6 @@
 //! Config validation: hard errors and advisory warnings.
 
-use super::types::{Config, NetPermission};
+use super::types::{Config, KNOWN_APPROVAL_CHANNELS, NetPermission};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConfigValidation {
@@ -53,6 +53,25 @@ pub fn validate_config(config: &Config) -> ConfigValidation {
         out.warnings.push(
             "permissions.net: true allows unrestricted network access - consider specifying allowed hosts".into(),
         );
+    }
+
+    if let Some(approval) = &config.approval {
+        for ch in approval.channels.iter().flatten() {
+            if !KNOWN_APPROVAL_CHANNELS.contains(&ch.as_str()) {
+                out.warnings.push(format!(
+                    "approval.channels: unknown channel '{ch}' is ignored"
+                ));
+            }
+        }
+        for (name, val) in [
+            ("timeoutSec", approval.timeout_sec),
+            ("runtimeTimeoutSec", approval.runtime_timeout_sec),
+        ] {
+            if val == Some(0) {
+                out.warnings
+                    .push(format!("approval.{name}: 0 expires immediately"));
+            }
+        }
     }
 
     let no_roots = config.workspace_roots.as_ref().is_none_or(Vec::is_empty);

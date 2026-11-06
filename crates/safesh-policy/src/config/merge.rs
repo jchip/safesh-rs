@@ -1,6 +1,6 @@
 //! Config merge: arrays union, scalars last-set-wins.
 
-use super::types::{Config, EnvConfig, NetPermission, PermissionsConfig};
+use super::types::{ApprovalConfig, Config, EnvConfig, NetPermission, PermissionsConfig};
 
 /// Union keeping first-seen order.
 fn union(a: Option<&Vec<String>>, b: Option<&Vec<String>>) -> Vec<String> {
@@ -48,6 +48,15 @@ fn merge_env(base: &EnvConfig, over: &EnvConfig) -> EnvConfig {
     }
 }
 
+fn merge_approval(base: &ApprovalConfig, over: &ApprovalConfig) -> ApprovalConfig {
+    ApprovalConfig {
+        // The list is replaced whole, not unioned.
+        channels: over.channels.clone().or_else(|| base.channels.clone()),
+        timeout_sec: over.timeout_sec.or(base.timeout_sec),
+        runtime_timeout_sec: over.runtime_timeout_sec.or(base.runtime_timeout_sec),
+    }
+}
+
 /// Merge `over` onto `base`. Neither input changes.
 #[must_use]
 pub fn merge_configs(base: &Config, over: &Config) -> Config {
@@ -82,6 +91,13 @@ pub fn merge_configs(base: &Config, over: &Config) -> Config {
             &base.env.clone().unwrap_or_default(),
             &over.env.clone().unwrap_or_default(),
         )),
+        approval: match (&base.approval, &over.approval) {
+            (None, None) => None,
+            (b, o) => Some(merge_approval(
+                &b.clone().unwrap_or_default(),
+                &o.clone().unwrap_or_default(),
+            )),
+        },
         // Rules only accumulate, so a project can't drop a global deny.
         rules: match (&base.rules, &over.rules) {
             (None, None) => None,

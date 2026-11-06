@@ -1,6 +1,7 @@
 //! Config shapes. Every field is optional so merge can tell unset from set.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -55,6 +56,54 @@ pub struct EnvConfig {
     pub allow_read_all: Option<bool>,
 }
 
+/// Approval channel names this version knows.
+pub const KNOWN_APPROVAL_CHANNELS: &[&str] = &["ask", "tmux", "gui"];
+
+/// Interactive approval settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalConfig {
+    /// Channels to try in order. An empty list means text only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_sec: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_timeout_sec: Option<u64>,
+}
+
+/// [`ApprovalConfig`] with defaults filled in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedApproval {
+    pub channels: Vec<String>,
+    pub timeout: Duration,
+    pub runtime_timeout: Duration,
+}
+
+impl ApprovalConfig {
+    pub const DEFAULT_TIMEOUT_SEC: u64 = 60;
+    pub const DEFAULT_RUNTIME_TIMEOUT_SEC: u64 = 45;
+
+    /// Concrete values, using defaults for anything unset.
+    #[must_use]
+    pub fn resolved(cfg: Option<&ApprovalConfig>) -> ResolvedApproval {
+        let cfg = cfg.cloned().unwrap_or_default();
+        ResolvedApproval {
+            channels: cfg.channels.unwrap_or_else(|| {
+                KNOWN_APPROVAL_CHANNELS
+                    .iter()
+                    .map(|c| (*c).to_string())
+                    .collect()
+            }),
+            timeout: Duration::from_secs(cfg.timeout_sec.unwrap_or(Self::DEFAULT_TIMEOUT_SEC)),
+            runtime_timeout: Duration::from_secs(
+                cfg.runtime_timeout_sec
+                    .unwrap_or(Self::DEFAULT_RUNTIME_TIMEOUT_SEC),
+            ),
+        }
+    }
+}
+
 /// Contents of `config.json` (global or project).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,6 +134,8 @@ pub struct Config {
     pub permissions: Option<PermissionsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<EnvConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<ApprovalConfig>,
     /// Argv rules: allow, ask or deny by argv prefix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules: Option<Vec<crate::rules::Rule>>,

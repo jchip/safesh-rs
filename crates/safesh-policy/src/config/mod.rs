@@ -20,7 +20,7 @@ pub use persist::{
     save_to_local_json, update_config_local,
 };
 pub use types::{
-    AllowedCommand, Config, DROPPED_KEYS, EnvConfig, LocalConfig, LocalPermissions, NetPermission,
-    PermissionsConfig,
+    AllowedCommand, ApprovalConfig, Config, DROPPED_KEYS, EnvConfig, KNOWN_APPROVAL_CHANNELS,
+    LocalConfig, LocalPermissions, NetPermission, PermissionsConfig, ResolvedApproval,
 };
 pub use validate::{ConfigValidation, validate_config};

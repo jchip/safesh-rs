@@ -1,5 +1,6 @@
 //! safesh command line entry point.
 
+mod approval;
 mod cache;
 mod context;
 mod evaluate;
@@ -73,6 +74,37 @@ enum Cmd {
         #[arg(long)]
         choice: String,
     },
+    /// Approval picker shown inside a tmux popup.
+    #[command(hide = true)]
+    ApproveUi {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        state_dir: PathBuf,
+        #[arg(long)]
+        deadline_ms: u64,
+    },
+    /// Show one approval prompt and print the choice. For tests.
+    #[command(hide = true)]
+    ApproveAsk {
+        #[arg(long)]
+        id: String,
+        /// Commands to approve. Ignored when `--path` is set.
+        #[arg(long = "command")]
+        commands: Vec<String>,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        write: bool,
+        #[arg(long, value_delimiter = ',', default_value = "tmux,gui")]
+        channels: Vec<String>,
+        #[arg(long, default_value_t = 60)]
+        show_sec: u64,
+        #[arg(long, default_value_t = 120)]
+        give_up_sec: u64,
+        #[arg(long)]
+        bin_dir: Vec<PathBuf>,
+    },
     /// Show what the pre-check decides for a script.
     Check {
         script: String,
@@ -101,6 +133,39 @@ fn main() -> ExitCode {
         Cmd::Shell { shell_name, args } => shell(&shell_name, &args),
         Cmd::Retry { id, choice } => retry::retry(&id, &choice),
         Cmd::RetryPath { id, choice } => retry::retry_path(&id, &choice),
+        Cmd::ApproveUi {
+            id,
+            state_dir,
+            deadline_ms,
+        } => approval::ui::run(&id, &state_dir, deadline_ms),
+        Cmd::ApproveAsk {
+            id,
+            commands,
+            path,
+            write,
+            channels,
+            show_sec,
+            give_up_sec,
+            bin_dir,
+        } => {
+            use safesh_policy::state::pending::PathOperation;
+            let request = match path {
+                Some(path) => approval::Request::Path {
+                    path,
+                    op: if write {
+                        PathOperation::Write
+                    } else {
+                        PathOperation::Read
+                    },
+                },
+                None => approval::Request::Command { commands },
+            };
+            let timing = approval::Timing {
+                show: std::time::Duration::from_secs(show_sec),
+                give_up_at: std::time::Instant::now() + std::time::Duration::from_secs(give_up_sec),
+            };
+            approval::cli_ask(&id, request, &channels, timing, bin_dir)
+        }
         Cmd::Check { script, session } => check(&script, session.as_deref()),
         Cmd::Install { agent, dry_run } => install::install(&agent, dry_run),
     };
