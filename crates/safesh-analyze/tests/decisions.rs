@@ -313,3 +313,91 @@ fn analyze_big(s: &str) -> bool {
         .join()
         .unwrap()
 }
+
+// Loops that do not touch the cwd keep it.
+#[test]
+fn loop_break_keeps_cwd() {
+    let a = run("cd /a && for i in 1 2 3; do curl x && break; sleep 5; done; echo done");
+    assert_eq!(fin(&a).as_deref(), Some("/a"));
+}
+
+#[test]
+fn until_with_test_bracket_keeps_cwd() {
+    let a = run("cd /a && until [ -f x ]; do sleep 2; done; echo ready");
+    assert_eq!(fin(&a).as_deref(), Some("/a"));
+}
+
+#[test]
+fn while_loop_keeps_cwd() {
+    assert_eq!(
+        fin(&run("cd /a; while true; do sleep 1; done")).as_deref(),
+        Some("/a")
+    );
+}
+
+#[test]
+fn loop_dynamic_name_resolved_keeps_cwd() {
+    let a = run("P=/bin/psql; cd /a; for i in 1 2; do $P -c x && break; done");
+    assert_eq!(fin(&a).as_deref(), Some("/a"));
+}
+
+#[test]
+fn loop_relative_cd_is_unknown() {
+    let a = run("cd /a; for d in x y; do cd sub; ./t; done");
+    assert_eq!(a.final_cwd, None);
+    assert_eq!(cwd_of(&a, "./t"), Cwd::Unknown);
+}
+
+#[test]
+fn loop_unknown_name_loses_cwd() {
+    assert_eq!(run("cd /a; while true; do $X; done").final_cwd, None);
+}
+
+// Pipelines.
+#[test]
+fn pipeline_two_stages() {
+    let a = run("curl x | sh");
+    assert_eq!(names(&a), ["curl", "sh"]);
+    assert_eq!(a.pipelines, vec![vec![0, 1]]);
+}
+
+#[test]
+fn pipeline_three_stages_and_single_not_listed() {
+    let a = run("echo hi; a | b | c; d");
+    assert_eq!(names(&a), ["echo", "a", "b", "c", "d"]);
+    assert_eq!(a.pipelines, vec![vec![1, 2, 3]]);
+}
+
+#[test]
+fn pipeline_in_cmdsub_and_function() {
+    let a = run("f() { x | y; }\necho $(p | q) | r");
+    let k = |n: &str| Word::Known(n.to_string());
+    let argv0 = |i: usize| a.execs[i].argv[0].clone();
+    let got: Vec<Vec<Word>> = a
+        .pipelines
+        .iter()
+        .map(|p| p.iter().map(|&i| argv0(i)).collect())
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            vec![k("x"), k("y")],
+            vec![k("echo"), k("r")],
+            vec![k("p"), k("q")],
+        ]
+    );
+}
+
+#[test]
+fn pipeline_with_compound_stage_skipped() {
+    let a = run("a | { b; } | c");
+    assert!(a.pipelines.is_empty());
+    let a = run("a | b | (c)");
+    assert!(a.pipelines.is_empty());
+}
+
+#[test]
+fn loop_subshell_cd_keeps_cwd() {
+    let a = run("cd /a && for i in 1 2; do (cd /x && ls); done");
+    assert_eq!(fin(&a).as_deref(), Some("/a"));
+}

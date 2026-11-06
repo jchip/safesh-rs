@@ -85,6 +85,9 @@ pub struct Analysis {
     pub execs: Vec<Exec>,
     /// Every redirect and `source` target, excluding device paths like `/dev/null`.
     pub opens: Vec<Open>,
+    /// One entry per pipeline of 2+ stages, in source order. Each stage is an index into
+    /// `execs`. Pipelines with a non-simple-command stage are left out.
+    pub pipelines: Vec<Vec<usize>>,
     /// Functions the script defines.
     pub functions: BTreeSet<String>,
     /// Cwd after every `&&` step succeeds. `None` when unknown.

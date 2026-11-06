@@ -268,15 +268,35 @@ impl<'a> Walker<'a> {
         if p.seq.len() == 1 {
             self.command(&p.seq[0]);
         } else {
+            let slot = self.out.pipelines.len();
+            self.out.pipelines.push(Vec::new());
+            let mut stages = Some(Vec::new());
             for c in &p.seq {
-                self.isolated(|w| w.command(c));
+                self.isolated(|w| match c {
+                    Command::Simple(sc) => match (w.simple(sc), stages.as_mut()) {
+                        (Some(i), Some(v)) => v.push(i),
+                        _ => stages = None,
+                    },
+                    _ => {
+                        w.command(c);
+                        stages = None;
+                    }
+                });
+            }
+            match stages {
+                Some(v) => self.out.pipelines[slot] = v,
+                None => {
+                    self.out.pipelines.remove(slot);
+                }
             }
         }
     }
 
     fn command(&mut self, c: &Command) {
         match c {
-            Command::Simple(sc) => self.simple(sc),
+            Command::Simple(sc) => {
+                self.simple(sc);
+            }
             Command::Compound(cc, redirs) => {
                 for r in redirs.iter().flat_map(|l| l.0.iter()) {
                     self.redirect(r);
@@ -390,6 +410,9 @@ impl<'a> Walker<'a> {
         for l in lists {
             scan_list(l, &mut scan);
         }
+        // A name that is only known at run time is judged by the walk: it resolves, or it
+        // loses the cwd by itself.
+        let dynamic = std::mem::take(&mut scan.dynamic);
         let (assigned, moves) = self.summarize(&scan);
         for n in &assigned {
             self.vars_set_unknown(n);
@@ -397,7 +420,11 @@ impl<'a> Walker<'a> {
         if moves {
             self.invalidate_cwd();
         }
+        let before = (self.cwd.clone(), self.ocwd.clone());
         run(self);
+        if dynamic && (self.cwd.clone(), self.ocwd.clone()) != before {
+            self.invalidate_cwd();
+        }
         for n in &assigned {
             self.vars_set_unknown(n);
         }
@@ -511,7 +538,8 @@ impl<'a> Walker<'a> {
 
     // ---- simple commands ----
 
-    fn simple(&mut self, sc: &ast::SimpleCommand) {
+    /// Walk a simple command. Returns the index of its `Exec` when it produced one.
+    fn simple(&mut self, sc: &ast::SimpleCommand) -> Option<usize> {
         let has_cmd = sc.word_or_name.is_some();
         for it in sc.prefix.iter().flat_map(|p| p.0.iter()) {
             match it {
@@ -528,7 +556,7 @@ impl<'a> Walker<'a> {
                 }
             }
         }
-        let Some(name) = &sc.word_or_name else { return };
+        let name = sc.word_or_name.as_ref()?;
         let name_word = self.expand(&name.value, Mode::Arg);
         let at = self.out.execs.len();
         let mut argv = vec![name_word];
@@ -557,10 +585,16 @@ impl<'a> Walker<'a> {
             }
         }
         let exec = self.dispatch(argv, &assigns, &raw_args);
-        if let Some(e) = exec {
-            let at = at.min(self.out.execs.len());
-            self.out.execs.insert(at, e);
+        let e = exec?;
+        let at = at.min(self.out.execs.len());
+        self.out.execs.insert(at, e);
+        // Sub-commands walked while expanding the arguments moved up by one.
+        for i in self.out.pipelines.iter_mut().flatten() {
+            if *i >= at {
+                *i += 1;
+            }
         }
+        Some(at)
     }
 
     /// Value of an assignment as a string, or `None` when unknown. Walks substitutions.

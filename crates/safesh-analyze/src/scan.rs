@@ -110,7 +110,8 @@ pub(crate) fn scan_compound(cc: &CompoundCommand, s: &mut Scan) {
             scan_list(&f.body.list, s);
         }
         CompoundCommand::BraceGroup(b) => scan_list(&b.list, s),
-        CompoundCommand::Subshell(b) => scan_list(&b.list, s),
+        // A subshell cannot change the parent's variables or cwd.
+        CompoundCommand::Subshell(_) => {}
         CompoundCommand::ForClause(f) => {
             s.assigned.insert(f.variable_name.clone());
             scan_list(&f.body.list, s);
@@ -153,7 +154,12 @@ fn scan_simple(sc: &ast::SimpleCommand, s: &mut Scan) {
         }
     }
     let Some(name) = &sc.word_or_name else { return };
-    match literal(&name.value) {
+    let lit = if name.value == "[" {
+        Some("[".to_string())
+    } else {
+        literal(&name.value)
+    };
+    match lit {
         None => s.dynamic = true,
         Some(n) => {
             if is_var_writer(&n) {
