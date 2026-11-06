@@ -189,7 +189,14 @@ impl Policy {
             deny_read: with_canonical(&abs(&eff.deny_read)),
             write: with_canonical(&abs(&write)),
             deny_write: with_canonical(&abs(perms.deny_write.as_deref().unwrap_or_default())),
-            run: eff.run.clone(),
+            // Only explicit paths go to Deno. Names are resolved lazily per check (D2), since
+            // resolving the whole allowlist through PATH up front costs tens of ms.
+            run: eff
+                .run
+                .iter()
+                .filter(|r| r.contains('/'))
+                .cloned()
+                .collect(),
         };
         let deno = Deno::new(&lists, host, cwd)?;
         let explicit_write = with_canonical(&abs(perms.write.as_deref().unwrap_or_default()));
@@ -276,7 +283,7 @@ impl Policy {
 
         let cwd_s = cwd.to_string_lossy();
         let abs = resolve_lexical(&cwd_s, command);
-        if self.deno.query_run(&abs) == State::Granted {
+        if self.deno.query_run(&abs) == State::Granted || self.is_resolved_allowed_name(&abs, cwd) {
             return allow(&abs);
         }
 
@@ -310,6 +317,23 @@ impl Policy {
             }
         }
         not_found(command)
+    }
+
+    /// D2: `abs` is allowed when its basename is an allowed name and PATH resolves that name to `abs`.
+    fn is_resolved_allowed_name(&self, abs: &str, cwd: &Path) -> bool {
+        let Some(name) = Path::new(abs).file_name().and_then(|n| n.to_str()) else {
+            return false;
+        };
+        if !self.run_set.contains(name) {
+            return false;
+        }
+        deno_permissions::which::which_in(
+            HostSys::new(&self.host, cwd),
+            name,
+            self.host.path.clone(),
+            cwd.to_path_buf(),
+        )
+        .is_ok_and(|found| found == Path::new(abs))
     }
 
     fn within_roots(&self, path: &str, cwd: &Path) -> bool {
