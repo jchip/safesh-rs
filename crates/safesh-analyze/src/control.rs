@@ -85,10 +85,15 @@ fn simple(sc: &SimpleCommand, found: &mut bool) -> bool {
     }
     let ok = match args.first().map(String::as_str) {
         Some("retry" | "retry-path") => true,
-        Some("run") if base == "safesh" => args
-            .iter()
-            .skip(1)
-            .any(|a| a == "--id" || a.starts_with("--id=")),
+        // A `--pending` run applies a once-grant, so the agent must not be able to type it unchecked.
+        Some("run") if base == "safesh" => {
+            let has = |f: &str| {
+                args.iter()
+                    .skip(1)
+                    .any(|a| a == f || a.starts_with(&format!("{f}=")))
+            };
+            has("--id") && !has("--pending")
+        }
         _ => false,
     };
     *found |= ok;

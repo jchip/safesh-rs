@@ -110,6 +110,8 @@ impl Env {
             .env("HOME", &self.home)
             .env("TMPDIR", self.root.join("tmp"))
             .env("SAFESH_STATE_DIR", &self.state)
+            // Never open a real popup or dialog. Approval tests remove this and use fakes.
+            .env("SAFESH_APPROVAL", "off")
             .current_dir(&self.proj);
     }
 

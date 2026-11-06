@@ -20,6 +20,7 @@ pub struct Context {
     pub project_dir: PathBuf,
     pub policy: Policy,
     pub warnings: Vec<String>,
+    pub approval: safesh_policy::config::ResolvedApproval,
 }
 
 impl Context {
@@ -47,6 +48,8 @@ impl Context {
         let mut loaded =
             load_session_config(base_cwd, session_id, &host).map_err(|e| e.to_string())?;
         grant(&mut loaded.config);
+        let approval =
+            safesh_policy::config::ApprovalConfig::resolved(loaded.config.approval.as_ref());
         let opts = PolicyOptions {
             session_id: session_id.map(str::to_string),
         };
@@ -59,6 +62,7 @@ impl Context {
             project_dir: loaded.project_dir,
             policy,
             warnings: loaded.warnings,
+            approval,
         })
     }
 

@@ -305,3 +305,11 @@ fn parse_error_is_error() {
     assert!(safesh_analyze::analyze("echo (", &opts()).is_err());
     assert!(safesh_analyze::analyze("echo 'x", &opts()).is_err());
 }
+
+#[test]
+fn run_with_pending_is_not_control_plane() {
+    assert!(is_control_plane("safesh run --id x"));
+    assert!(!is_control_plane("safesh run --id x --pending p"));
+    assert!(!is_control_plane("safesh run --id=x --pending=p"));
+    assert!(!is_control_plane("/abs/path/safesh run --id x --pending p"));
+}

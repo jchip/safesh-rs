@@ -39,6 +39,9 @@ enum Cmd {
         /// Log the decision without acting on it.
         #[arg(long)]
         shadow: bool,
+        /// Most seconds to wait for the user. `safesh install` sets it below the hook timeout.
+        #[arg(long)]
+        budget_sec: Option<u64>,
     },
     /// Run a cached, approved script.
     Run {
@@ -49,6 +52,9 @@ enum Cmd {
         session: Option<String>,
         #[arg(long)]
         background: bool,
+        /// Pending id whose once-grant applies to this run.
+        #[arg(long)]
+        pending: Option<String>,
     },
     /// Nested shell entry: `bash`/`sh` re-routed by the runtime gate.
     #[command(hide = true)]
@@ -124,12 +130,17 @@ enum Cmd {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let code = match cli.cmd {
-        Cmd::Hook { agent, shadow } => hook::run(agent, shadow),
+        Cmd::Hook {
+            agent,
+            shadow,
+            budget_sec,
+        } => hook::run(agent, shadow, budget_sec),
         Cmd::Run {
             id,
             session,
             background,
-        } => run_cached(&id, session.as_deref(), background),
+            pending,
+        } => run_cached(&id, session.as_deref(), background, pending.as_deref()),
         Cmd::Shell { shell_name, args } => shell(&shell_name, &args),
         Cmd::Retry { id, choice } => retry::retry(&id, &choice),
         Cmd::RetryPath { id, choice } => retry::retry_path(&id, &choice),
@@ -222,7 +233,7 @@ fn command_args(script: String) -> safesh_exec::ShellArgs {
     }
 }
 
-fn run_cached(id: &str, session: Option<&str>, background: bool) -> u8 {
+fn run_cached(id: &str, session: Option<&str>, background: bool, pending: Option<&str>) -> u8 {
     let cwd = match std::env::current_dir() {
         Ok(c) => c,
         Err(e) => return fail(&e.to_string()),
@@ -230,7 +241,23 @@ fn run_cached(id: &str, session: Option<&str>, background: bool) -> u8 {
     let session = session
         .map(str::to_string)
         .or_else(|| std::env::var(context::ENV_SESSION).ok());
-    let ctx = match Context::load(&cwd, session.as_deref()) {
+    let host = safesh_policy::host::HostEnv::from_process();
+    let grant = match pending {
+        Some(p) => match approval::once::claim(&host.state_dir, p, id) {
+            Some(g) => Some(g),
+            None => {
+                return fail(&format!(
+                    "no once-grant {p} for this script; it may have been used or expired"
+                ));
+            }
+        },
+        None => None,
+    };
+    let ctx = match Context::load_granted(host, &cwd, session.as_deref(), |c| {
+        if let Some(g) = grant {
+            g.apply(c);
+        }
+    }) {
         Ok(c) => c,
         Err(e) => return fail(&e),
     };

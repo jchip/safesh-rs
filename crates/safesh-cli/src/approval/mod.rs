@@ -5,6 +5,7 @@
 
 mod files;
 mod gui;
+pub mod once;
 mod proc;
 mod tmux;
 pub mod ui;
@@ -184,8 +185,17 @@ impl Env {
             macos: cfg!(target_os = "macos"),
             exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("safesh")),
             state_dir: state_dir.to_path_buf(),
-            bin_dirs: Self::BIN_DIRS.iter().map(PathBuf::from).collect(),
+            bin_dirs: Self::bin_dirs(),
         }
+    }
+
+    /// Debug builds let e2e tests point at fake channel binaries. Release builds never do.
+    fn bin_dirs() -> Vec<PathBuf> {
+        #[cfg(debug_assertions)]
+        if let Some(d) = std::env::var_os("SAFESH_TEST_BIN_DIRS") {
+            return std::env::split_paths(&d).collect();
+        }
+        Self::BIN_DIRS.iter().map(PathBuf::from).collect()
     }
 
     /// First executable file called `name` in `bin_dirs`.

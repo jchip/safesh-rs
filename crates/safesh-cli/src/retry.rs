@@ -14,7 +14,7 @@ use crate::{cache, command_args, execute, fail};
 
 /// Where a grant lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Scope {
+pub enum Scope {
     Once,
     Session,
     Project,
@@ -49,6 +49,54 @@ fn rerun(
     )
 }
 
+/// Saves a command grant for `scope`. Returns the scope used: a session grant without a
+/// session id becomes once.
+pub fn save_command_grant(
+    host: &HostEnv,
+    commands: &[String],
+    cwd: &Path,
+    project: &Path,
+    session: Option<&str>,
+    scope: Scope,
+) -> Result<Scope, String> {
+    match (scope, session) {
+        (Scope::Project, _) => add_commands_to_config(commands, cwd).map_err(|e| e.to_string())?,
+        (Scope::Global, _) => save_to_global_json(host, commands).map_err(|e| e.to_string())?,
+        (Scope::Session, Some(sid)) => {
+            add_session_commands(host, commands, Some(project), sid).map_err(|e| e.to_string())?;
+        }
+        (Scope::Session, None) => {
+            eprintln!("safesh: no session id; allowing once instead");
+            return Ok(Scope::Once);
+        }
+        (Scope::Once, _) => {}
+    }
+    Ok(scope)
+}
+
+/// Path version of [`save_command_grant`]. Paths have no global scope; it is saved as once.
+pub fn save_path_grant(
+    host: &HostEnv,
+    read: &[String],
+    write: &[String],
+    cwd: &Path,
+    session: Option<&str>,
+    scope: Scope,
+) -> Result<Scope, String> {
+    match (scope, session) {
+        (Scope::Project, _) => add_paths_to_config(read, write, cwd).map_err(|e| e.to_string())?,
+        (Scope::Session, Some(sid)) => {
+            add_session_paths(host, read, write, Some(cwd), sid).map_err(|e| e.to_string())?;
+        }
+        (Scope::Session, None) => {
+            eprintln!("safesh: no session id; allowing once instead");
+            return Ok(Scope::Once);
+        }
+        (Scope::Global | Scope::Once, _) => return Ok(Scope::Once),
+    }
+    Ok(scope)
+}
+
 pub fn retry(id: &str, choice: &str) -> u8 {
     let host = HostEnv::from_process();
     let Some(p) = read_pending_command(&host, id) else {
@@ -72,18 +120,7 @@ pub fn retry(id: &str, choice: &str) -> u8 {
         .as_ref()
         .map_or_else(|| cwd.clone(), PathBuf::from);
     let session = p.session_id.as_deref();
-    let saved = match (scope, session) {
-        (Scope::Project, _) => add_commands_to_config(&p.commands, &cwd).map_err(|e| e.to_string()),
-        (Scope::Global, _) => save_to_global_json(&host, &p.commands).map_err(|e| e.to_string()),
-        (Scope::Session, Some(sid)) => {
-            add_session_commands(&host, &p.commands, Some(&project), sid).map_err(|e| e.to_string())
-        }
-        (Scope::Session, None) => {
-            eprintln!("safesh: no session id; allowing once instead");
-            Ok(())
-        }
-        (Scope::Once, _) => Ok(()),
-    };
+    let saved = save_command_grant(&host, &p.commands, &cwd, &project, session, scope);
     if let Err(e) = saved {
         return fail(&e);
     }
@@ -184,17 +221,7 @@ pub fn retry_path(id: &str, choice: &str) -> u8 {
     };
     let cwd = PathBuf::from(&p.cwd);
     let session = p.session_id.as_deref();
-    let saved = match (c.scope, session) {
-        (Scope::Project, _) => add_paths_to_config(&read, &write, &cwd).map_err(|e| e.to_string()),
-        (Scope::Session, Some(sid)) => {
-            add_session_paths(&host, &read, &write, Some(&cwd), sid).map_err(|e| e.to_string())
-        }
-        (Scope::Session, None) => {
-            eprintln!("safesh: no session id; allowing once instead");
-            Ok(())
-        }
-        _ => Ok(()),
-    };
+    let saved = save_path_grant(&host, &read, &write, &cwd, session, c.scope);
     if let Err(e) = saved {
         return fail(&e);
     }

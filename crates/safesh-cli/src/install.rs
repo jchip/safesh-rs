@@ -42,11 +42,18 @@ pub fn install(agent: &str, dry_run: bool) -> u8 {
     }
 }
 
+/// Seconds a `PreToolUse` hook may wait for the user; kept under `PRE_TOOL_TIMEOUT`.
+const BUDGET_SEC: u32 = 590;
+/// Agent-side `PreToolUse` hook timeout in seconds.
+const PRE_TOOL_TIMEOUT: u32 = 600;
+
 fn hook_command(exe: &str, agent: &str, shadow: bool) -> String {
     let mut c = format!("{} hook {agent}", crate::hook::sh_quote(exe));
     if shadow {
         c.push_str(" --shadow");
     }
+    c.push_str(" --budget-sec ");
+    c.push_str(&BUDGET_SEC.to_string());
     c
 }
 
@@ -118,7 +125,7 @@ fn claude(path: &Path, exe: &str, shadow: bool, dry_run: bool) -> Result<String,
     pre.retain(|m| m["hooks"].as_array().is_none_or(|h| !h.is_empty()));
     pre.push(json!({
         "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": hook_command(exe, "claude", shadow) }]
+        "hooks": [{ "type": "command", "command": hook_command(exe, "claude", shadow), "timeout": PRE_TOOL_TIMEOUT }]
     }));
     let text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())? + "\n";
     write_file(path, &text, dry_run)
@@ -132,12 +139,14 @@ fn codex(path: &Path, exe: &str, shadow: bool, dry_run: bool) -> Result<String, 
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
     let cmd = hook_command(exe, "codex", shadow);
+    // The PermissionRequest hook is quick and takes no budget flag.
+    let perm_cmd = cmd.replace(&format!(" --budget-sec {BUDGET_SEC}"), "");
     let block = format!(
         "{CODEX_BEGIN}\n# Managed by safesh install codex. Rerun it to update.\n\
 [[hooks.PreToolUse]]\nmatcher = \"^Bash$\"\n\n[[hooks.PreToolUse.hooks]]\ntype = \"command\"\n\
-command = {cmd:?}\ntimeout = 30\nstatusMessage = \"Routing Bash through safesh\"\n\n\
+command = {cmd:?}\ntimeout = {PRE_TOOL_TIMEOUT}\nstatusMessage = \"Routing Bash through safesh\"\n\n\
 [[hooks.PermissionRequest]]\nmatcher = \"^Bash$\"\n\n[[hooks.PermissionRequest.hooks]]\n\
-type = \"command\"\ncommand = {cmd:?}\ntimeout = 5\nstatusMessage = \"Authorizing safesh runner\"\n{CODEX_END}\n"
+type = \"command\"\ncommand = {perm_cmd:?}\ntimeout = 5\nstatusMessage = \"Authorizing safesh runner\"\n{CODEX_END}\n"
     );
     let content = match (existing.find(CODEX_BEGIN), existing.find(CODEX_END)) {
         (Some(b), Some(e)) if e > b => {
@@ -193,7 +202,7 @@ fn agy(path: &Path, exe: &str, shadow: bool, dry_run: bool) -> Result<String, St
             "enabled": true,
             "PreToolUse": [{
                 "matcher": "run_command",
-                "hooks": [{ "type": "command", "command": hook_command(exe, "agy", shadow), "timeout": 30 }]
+                "hooks": [{ "type": "command", "command": hook_command(exe, "agy", shadow), "timeout": PRE_TOOL_TIMEOUT }]
             }]
         }),
     );
@@ -235,6 +244,80 @@ mod tests {
         let t = std::fs::read_to_string(&path).unwrap();
         assert_eq!(t.matches(CODEX_BEGIN).count(), 1);
         assert!(t.contains("/y/safesh") && !t.contains("/x/safesh") && t.starts_with("model"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn tmp(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("safesh-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn hook_command_has_budget() {
+        assert_eq!(
+            hook_command("/x/safesh", "claude", false),
+            "'/x/safesh' hook claude --budget-sec 590"
+        );
+        assert!(hook_command("/x/safesh", "agy", true).ends_with("--shadow --budget-sec 590"));
+    }
+
+    #[test]
+    fn claude_replaces_old_entry_and_sets_timeout() {
+        let dir = tmp("old-claude");
+        let path = dir.join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/old/safesh hook claude","timeout":30}]}]}}"#,
+        )
+        .unwrap();
+        claude(&path, "/x/safesh", false, false).unwrap();
+        let v = read_json(&path).unwrap();
+        let pre = v["hooks"]["PreToolUse"].as_array().unwrap();
+        assert_eq!(pre.len(), 1, "{v}");
+        let h = &pre[0]["hooks"][0];
+        assert_eq!(h["command"], "'/x/safesh' hook claude --budget-sec 590");
+        assert_eq!(h["timeout"], 600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn agy_replaces_old_entry_and_sets_timeout() {
+        let dir = tmp("old-agy");
+        let path = dir.join("hooks.json");
+        std::fs::write(
+            &path,
+            r#"{"safesh":{"enabled":true,"PreToolUse":[{"matcher":"run_command","hooks":[{"type":"command","command":"/old/safesh hook agy","timeout":30}]}]}}"#,
+        )
+        .unwrap();
+        agy(&path, "/x/safesh", false, false).unwrap();
+        let v = read_json(&path).unwrap();
+        assert_eq!(v.as_object().unwrap().len(), 1, "{v}");
+        let h = &v["safesh"]["PreToolUse"][0]["hooks"][0];
+        assert_eq!(h["command"], "'/x/safesh' hook agy --budget-sec 590");
+        assert_eq!(h["timeout"], 600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn codex_replaces_old_block_and_sets_timeouts() {
+        let dir = tmp("old-codex");
+        let path = dir.join("config.toml");
+        let old = format!(
+            "model = \"x\"\n\n{CODEX_BEGIN}\n[[hooks.PreToolUse.hooks]]\ncommand = \"/old/safesh hook codex\"\ntimeout = 30\n{CODEX_END}\nafter = 1\n"
+        );
+        std::fs::write(&path, old).unwrap();
+        codex(&path, "/x/safesh", false, false).unwrap();
+        let t = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(t.matches(CODEX_BEGIN).count(), 1, "{t}");
+        assert!(
+            !t.contains("/old/safesh") && !t.contains("timeout = 30"),
+            "{t}"
+        );
+        assert!(t.contains("command = \"'/x/safesh' hook codex --budget-sec 590\"\ntimeout = 600"));
+        assert!(t.contains("command = \"'/x/safesh' hook codex\"\ntimeout = 5"));
+        assert!(t.starts_with("model") && t.trim_end().ends_with("after = 1"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

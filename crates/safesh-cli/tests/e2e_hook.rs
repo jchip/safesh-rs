@@ -225,6 +225,8 @@ fn install_claude_dry_run_prints_and_writes_nothing() {
     assert_eq!(r.code, 0, "{}", r.stderr);
     assert!(r.stdout.contains("would write"), "{}", r.stdout);
     assert!(r.stdout.contains(" hook claude"), "{}", r.stdout);
+    assert!(r.stdout.contains("--budget-sec 590"), "{}", r.stdout);
+    assert!(r.stdout.contains("\"timeout\": 600"), "{}", r.stdout);
     assert!(r.stdout.contains("PreToolUse"));
     assert!(!e.home.join(".claude/settings.json").exists());
 }
@@ -254,8 +256,9 @@ fn install_claude_shadow_next_to_ts_hook() {
         pre[1]["hooks"][0]["command"]
             .as_str()
             .unwrap()
-            .ends_with("hook claude --shadow")
+            .ends_with("hook claude --shadow --budget-sec 590")
     );
+    assert_eq!(pre[1]["hooks"][0]["timeout"], 600);
 }
 
 #[test]
