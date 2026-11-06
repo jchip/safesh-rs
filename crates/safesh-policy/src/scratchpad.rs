@@ -85,10 +85,10 @@ pub fn is_new_session_scratchpad_script(
         return false;
     }
     let Some(uid) = uid else { return false };
-    match fs_err::symlink_metadata(path) {
-        Ok(_) => return false,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return false,
+    // Only a path that does not exist yet counts as a new script.
+    if !matches!(fs_err::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+    {
+        return false;
     }
     let mut dir = normalize_lexical(path);
     loop {
