@@ -148,6 +148,8 @@ fn dedupe(v: Vec<String>) -> Vec<String> {
 pub const PATH_CHECKED_COMMANDS: &[&str] =
     &["rm", "rmdir", "cp", "mv", "mkdir", "touch", "ln", "chmod"];
 
+// `safesh` itself is always allowed: `safesh retry` inside a larger script runs under the gate.
+
 /// Options that come from the caller, not the config.
 #[derive(Debug, Clone, Default)]
 pub struct PolicyOptions {
@@ -224,6 +226,7 @@ impl Policy {
                 .run
                 .into_iter()
                 .chain(PATH_CHECKED_COMMANDS.iter().map(|c| (*c).to_string()))
+                .chain(["safesh".to_string()])
                 .collect(),
             rules: config.rules.clone().unwrap_or_default(),
             allow_project_commands: config

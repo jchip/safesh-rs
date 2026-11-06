@@ -28,16 +28,38 @@ fn ph_3_other_wrappers_are_not_control_plane() {
 }
 
 #[test]
-fn ph_5_structural_search() {
-    assert!(is_control_plane(
+fn ph_5_structural_shapes() {
+    // CHANGED: passthrough skips all checks, so other commands in the script disqualify it.
+    // Such scripts go through the normal pre-check, where `safesh` is an allowed command.
+    assert!(!is_control_plane(
         "cd /Users/jc/dev/fyn-prod-env && safesh retry --id=x --choice=1 2>&1 | tail -20"
     ));
     assert!(is_control_plane(
         "cd /tmp && safesh retry-path --id=x --choice=2"
     ));
+    assert!(is_control_plane("safesh retry --id=x --choice=1 2>&1"));
     assert!(is_control_plane("(safesh retry --id=x)"));
     assert!(is_control_plane("{ safesh retry --id=x; }"));
     assert!(!is_control_plane("if true; then safesh retry --id=x; fi"));
+}
+
+#[test]
+fn control_plane_cannot_carry_other_work() {
+    for s in [
+        "safesh retry --id=x; rm -rf ~",
+        "safesh retry --id=x && rm -rf ~",
+        "rm -rf ~ || safesh retry --id=x",
+        "TMPDIR=$(rm -rf ~) safesh retry --id=x",
+        "safesh retry --id=$(rm -rf ~)",
+        "safesh retry --id=x > /etc/passwd",
+        "safesh retry --id=x | sh",
+        "cd $(rm -rf ~) && safesh retry --id=x",
+        "(safesh retry --id=x) > out",
+        "cd /tmp",
+        "",
+    ] {
+        assert!(!is_control_plane(s), "{s}");
+    }
 }
 
 #[test]
