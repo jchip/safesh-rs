@@ -125,12 +125,12 @@ Costs and how we handle them:
 | Point | How |
 |---|---|
 | Exec | `PolicyLauncher` implements brush's `ProcessLauncher`. It is passed as an `Arc` through the shell builder. `LaunchRequest` gives the resolved program, argv0, expanded args, full env and cwd. |
-| Redirects and `source` | brush routes all of them through the private `Shell::open_file`. A 31-line patch adds a default `ProcessLauncher::check_open(path, write)` and calls it at 3 sites. It goes upstream as a PR. Until it lands, we carry it as a vendored patch. |
-| Nested shells | The launcher rewrites a `bash` or `sh` exec to the safesh binary. The child is a real process, so PIDs, fds and job control stay native. Cost is about 8 ms per nested shell. |
-| Abort | A runtime deny must stop the whole run, including later pipeline stages. The spike used `process::exit(126)`. P3 replaces it with a clean abort path. |
+| Redirects and `source` | brush routes all of them through the private `Shell::open_file`. A 31-line patch adds a default `ProcessLauncher::check_open(path, write)` and calls it at 3 sites. It goes upstream as a PR. Until it lands, `vendor/brush-core` carries it, and a `[patch]` section points the pinned brush git source at that copy. |
+| Nested shells | The launcher rewrites a `bash`, `sh` or `dash` exec to `safesh shell <bash args>`, passing session, base cwd and script id through env. The child is a real process, so PIDs, fds and job control stay native. Cost is about 8 ms per nested shell. A shell started by a wrapper such as `env bash -c` is not re-routed, so it gets a normal run check. |
+| Abort | A runtime deny prints the message, flushes stdout and exits 126. Pipeline stages see a closed pipe. A nested shell also sends SIGUSR1 to its parent safesh (`SAFESH_PARENT_PID`), which exits 126 the same way, so a denial anywhere stops the whole run. |
 | Builtins | brush's in-process coreutils builtins stay off, so file-changing tools are always real execs. |
 
-brush is pinned to an exact commit or version. Known gap: `wait <pid>` and `wait $!` are unimplemented and are the first upstream fix.
+brush is pinned to commit b2f7782 for both the parser and the engine, so the pre-check and the runtime share one AST. Known gap: `wait <pid>` and `wait $!` are unimplemented and are the first upstream fix.
 
 ## 6. Workspace layout
 
@@ -142,7 +142,7 @@ brush is pinned to an exact commit or version. Known gap: `wait <pid>` and `wait
 | `safesh-hooks` | agent protocols: Claude/Gemini, Codex, agy; byte-compatible output | policy, analyze |
 | `safesh-cli` | the `safesh` binary and subcommands | all |
 
-Today only `safesh-policy` and `safesh-cli` exist. The others are added in their phase.
+All five crates exist. `safesh-cli` holds the hook decision flow, the runtime gate, retry and install.
 
 Planned modules in `safesh-policy`:
 
@@ -178,8 +178,11 @@ Planned modules in `safesh-policy`:
 | Local config | `<project>/.config/safesh/config.local.json` | user, retry choice 2 |
 | Session grants | `<project>/.temp/safesh/session-<id>.json` | retry choice 3 |
 | Pending | `/tmp/safesh/pending/pending-<id>.json`, `pending-path-<id>.json` | hook and run on deny; 5-minute TTL |
-| Script cache | `/tmp/safesh/scripts/` | hook on allow |
+| Script cache | `/tmp/safesh/scripts/script-<id>.sh`, id = 16 hex of sha256 | hook, on allow and on deny (retry reruns it) |
+| Shadow log | `/tmp/safesh/shadow.jsonl` | `hook --shadow` |
 | Codex approvals | `/tmp/safesh/approvals/` | Codex hook; mode 0600 |
+
+`SAFESH_STATE_DIR` replaces `/tmp/safesh` for every state file.
 
 ## 9. Chosen crates
 

@@ -107,7 +107,7 @@ Rules:
 | `bash -c`, `sh -c`, `bash script.sh` | re-exec safesh as the child shell, so the payload hits the hook |
 | `ssh`, `docker exec`, `kubectl exec` | the command runs elsewhere; check the outer command only |
 
-The nested-shell trick only covers shells started by our engine. A `bash` started by `make` or `python` is outside the boundary (section 3).
+The nested-shell trick only covers shells started by our engine. A shell started by a wrapper (`env bash -c`, `xargs sh -c`, `find -exec sh -c`) is a real exec outside safesh, so it gets a normal run check, and `bash` is not on the default allowlist. A `bash` started by `make` or `python` is outside the boundary (section 3).
 
 ### 4.5 Redirects and builtins
 
@@ -130,7 +130,7 @@ Walk rules:
 - Redirect and command cwds stop being known after a `cd` the walk can't be sure ran. The final cwd assumes every `&&` step succeeds.
 - Wrappers like `env`, `xargs` and `bash -c` are plain commands here. Unwrapping happens in the shared Interpret stage, so the pre-check and the runtime can't disagree.
 - `source` and `.` targets are read checks. `cd` is not checked; it only moves the tracked cwd.
-- Control-plane commands pass through untouched: `safesh run|retry|retry-path`, plus `desh retry|retry-path` for one release.
+- Control-plane commands pass through untouched: `safesh run|retry|retry-path`, plus `desh retry|retry-path` for one release. This applies only when the whole script is such calls, joined by `&&`/`;` or followed by a literal `cd`, with literal words and fd-duplication redirects only. Anything else takes the normal pre-check, where `safesh` is allowed by name. TS accepted any script that contained a retry call, which let other commands skip checks.
 
 ## 5. Runtime denial
 

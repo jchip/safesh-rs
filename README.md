@@ -2,9 +2,61 @@
 
 A non-interactive bash runner for AI coding agents. It parses bash with [brush](https://github.com/reubeno/brush), runs commands directly, and checks every command and redirect against a permission policy before it happens.
 
-This is the Rust rewrite of [safesh](https://github.com/jchip/safesh) (Deno/TypeScript). It's a work in progress. See `notes/README.md` for the design and status.
+This is the Rust rewrite of [safesh](https://github.com/jchip/safesh) (Deno/TypeScript). Status: **alpha**. See `notes/README.md` for the design and status.
+
+## Build
 
 ```sh
-cargo build
+cargo build --release
 cargo test --workspace
 ```
+
+The binary is `target/release/safesh`. Put it on your `PATH`; the retry hints it prints call `safesh` by name.
+
+## How it works
+
+1. The agent's PreToolUse hook calls `safesh hook <agent>`. It parses the command and checks every command, redirect and `source` target it can see.
+2. Allowed: the hook rewrites the command to `safesh run --id <hash>`, plus `&& cd '<dir>'` when the script changes directory.
+3. Not allowed: the hook denies with a retry menu. The agent asks you, then runs `safesh retry --id=<id> --choice=<n>`.
+4. `safesh run` executes the script in an embedded bash engine. Every exec and file open is checked again at runtime. A denial stops the whole run with status 126 and prints the same retry menu.
+
+safesh only sees what its own shell runs. A Python script deleting files, or `make` running its own `/bin/sh`, is outside its reach.
+
+## Install
+
+```sh
+safesh install claude          # Claude Code: ~/.claude/settings.json
+safesh install codex           # Codex: $CODEX_HOME/config.toml (then /hooks to trust)
+safesh install agy             # Antigravity: ~/.gemini/config/hooks.json
+safesh install claude-shadow   # log decisions only, next to the TS hook
+```
+
+Add `--dry-run` to print the change without writing it. The installer won't replace a TS safesh hook; use the `-shadow` form next to it.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `safesh hook claude\|gemini\|codex\|agy [--shadow]` | PreToolUse entry point |
+| `safesh run --id <hash>` | run an approved, cached script |
+| `safesh retry --id <id> --choice <1-5>` | approve a pending command, then run it |
+| `safesh retry-path --id <id> --choice <r\|w\|rw><1-3>[d]` | approve a pending path, then run it |
+| `safesh check '<script>'` | show what the pre-check decides |
+| `safesh install <agent>` | install the hook |
+
+## Config
+
+JSON, same files and merge rules as TS safesh:
+- `~/.config/safesh/config.json` (or `$XDG_CONFIG_HOME/safesh/config.json`)
+- `<project>/.config/safesh/config.json`
+- `<project>/.config/safesh/config.local.json`
+
+`config.ts` files are not read. Convert them with `desh migrate-config` from the last TS release.
+
+New in the Rust version: argv `rules`, prefix patterns with `allow`, `ask` or `deny`:
+
+```json
+{ "rules": [ { "match": ["git", "push", "--force*"], "action": "ask" } ] }
+```
+
+State lives in `/tmp/safesh` (override with `SAFESH_STATE_DIR`).
