@@ -412,14 +412,14 @@ td.k { font-family: var(--f-display); font-weight: 700; white-space: nowrap; }
 
 <section>
   <div class="eyebrow">9 · Plan</div>
-  <h2>Prove, build, shadow, then switch</h2>
+  <h2>Prove, build, shadow, then switch. Alpha is built.</h2>
   <div class="phases">
     <div class="phase"><div class="n">P0</div><div><b>Spike</b><span class="d">brush + policy launcher + corpus + latency</span></div><span class="pill done">done</span></div>
-    <div class="phase"><div class="n">P1</div><div><b>Policy core</b><span class="d">deno_permissions facade, JSON config, sessions, 330 ported test rows</span></div><span class="pill now">in progress</span></div>
-    <div class="phase"><div class="n">P2</div><div><b>Static pre-check</b><span class="d">brush-parser AST, diffed against the TS analyzer on 15.8k commands</span></div><span class="pill next">next</span></div>
-    <div class="phase"><div class="n">P3</div><div><b>Exec engine</b><span class="d">gates, command specs, wrappers, argv rules, runtime denial</span></div><span class="pill next">next</span></div>
-    <div class="phase"><div class="n">P4</div><div><b>Agent hooks</b><span class="d">Claude/Gemini, Codex, agy; byte-identical output</span></div><span class="pill next">next</span></div>
-    <div class="phase"><div class="n">P5</div><div><b>Shadow mode</b><span class="d">Rust decisions logged beside TS for two weeks</span></div><span class="pill next">next</span></div>
+    <div class="phase"><div class="n">P1</div><div><b>Policy core</b><span class="d">deno_permissions facade, JSON config, sessions, 330 ported test rows</span></div><span class="pill done">done</span></div>
+    <div class="phase"><div class="n">P2</div><div><b>Static pre-check</b><span class="d">brush-parser AST, diffed against the TS analyzer on 15.6k commands</span></div><span class="pill done">done</span></div>
+    <div class="phase"><div class="n">P3</div><div><b>Exec engine</b><span class="d">gates, command specs, wrappers, argv rules, runtime denial</span></div><span class="pill done">done</span></div>
+    <div class="phase"><div class="n">P4</div><div><b>Agent hooks</b><span class="d">Claude/Gemini, Codex, agy; same output shapes as TS</span></div><span class="pill done">done</span></div>
+    <div class="phase"><div class="n">P5</div><div><b>Shadow mode</b><span class="d">Rust decisions logged beside TS for two weeks; tooling ready</span></div><span class="pill now">next</span></div>
     <div class="phase"><div class="n">P6</div><div><b>Cutover</b><span class="d">config.ts converter, switch hooks, archive TS</span></div><span class="pill gate">needs sign-off</span></div>
     <div class="phase"><div class="n">P7</div><div><b>Windows</b><span class="d">WSL2 first, native Git Bash later</span></div><span class="pill next">later</span></div>
   </div>
