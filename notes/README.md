@@ -30,4 +30,4 @@ Next steps:
 1. Add `deno_permissions` (pinned) behind `safesh-policy::policy`. Map config `permissions.*` to `PermissionsOptions`.
 2. Write the config loader (JSON, today's merge rules) and the session and pending file I/O.
 3. Port the spec rows for permissions, config, session, pending, project-root and scratchpad.
-4. Open question from the spec: is `src/external` (path_validator, registry) in scope? Its `external` config entries become argv rules in P3.
+4. `src/external` and the `external` config field are out of scope. Skip spec rows pv-*, cv-5, cv-7 and pd-13 to pd-15.

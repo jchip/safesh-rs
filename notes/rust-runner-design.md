@@ -171,7 +171,7 @@ Prefix rules on the expanded argv, with three results: allow, ask, deny. Deny be
 ]
 ```
 
-Pipeline-shaped rules such as `curl | sh` are matched by the static pre-check, since the runtime hook sees one process at a time. The existing `external` subcommand and flag config is converted into these rules.
+Pipeline-shaped rules such as `curl | sh` are matched by the static pre-check, since the runtime hook sees one process at a time. The TS `external` config and `src/external` are out of scope. Argv rules replace them.
 
 ### 5.3 Path arguments for file-changing commands (new, required)
 
@@ -238,7 +238,7 @@ Partial side effects are possible in this case. The pre-check keeps it rare.
 ### 7.1 Config
 
 - Same file locations, merge order and merge rules as today (union for lists, deny lists only grow).
-- JSON only. Fields that are TS-only get dropped: `imports`, `denoFlags`, `vfs`, `nativeCommands`, `projectTemp`, `alwaysTranspile`, `tasks`.
+- JSON only. Fields that are TS-only get dropped: `imports`, `denoFlags`, `vfs`, `nativeCommands`, `projectTemp`, `alwaysTranspile`, `tasks`. The `external` field is dropped too, since `src/external` is out of scope. The loader warns when it sees one.
 - New fields: `rules` (5.2), plus optional overrides for the arg-spec table.
 - Converter: the **last TS release** adds `desh migrate-config`. It imports each `config.ts` and `config.local.ts` with Deno, then writes the JSON equivalent next to it. It runs under Deno because `.ts` configs can hold arbitrary code. The Rust binary warns when it finds a `.ts` config with no `.json` beside it.
 
@@ -322,7 +322,7 @@ Exit check: the differential shows no unexplained diffs, and `tests/bugs` analyz
 - Embed brush-core with PolicyLauncher, the redirect gate and the builtin gate.
 - Add wrapper handling (5.4) and the runtime denial flow (6).
 - **(mech)** Build the arg-spec table (5.3) and its tests from man pages.
-- Write the argv rules engine. **(mech)** Convert `external` config entries into rules.
+- Write the argv rules engine.
 
 Exit check: the hook-coverage suite and the engine conformance corpus pass.
 
@@ -358,4 +358,4 @@ Exit check: two weeks with no unexplained decision diffs.
 - **D3:** key session grants by hook stdin `session_id`. Existing `session-default.json` grants stop applying.
 - **D4:** one choice numbering, the hook's 1-5, for every agent.
 - **D5:** the Rust code lives in its own repo, `~/dev/safesh-rs`, which has no remote yet.
-- **D6 (proposed, awaiting review):** enforcement follows Deno's shape (4.1), with `deno_permissions` as the policy base behind a facade (4.2).
+- **D6:** enforcement follows Deno's shape (4.1), with `deno_permissions` as the policy base behind a facade (4.2).
