@@ -52,15 +52,17 @@ fn pu_16_explicit_read_allowed() {
 }
 
 #[test]
-#[ignore = "facade: cwd is always in default read, TS checkPathPermission has no defaults"]
 fn pu_17_path_outside_read_list_not_allowed() {
+    // TS checkPathPermission has no default lists; the facade always adds cwd to read,
+    // so the cwd sits outside the target dir.
     let f = fx();
     let t = f.root.join("t");
+    let cwd = f.root.join("elsewhere");
     let c = with_perms(Default::default(), |p| {
         p.read = Some(s(&["/some/other/path"]));
     });
-    let p = policy(&c, &t, &f.host);
-    assert_ask(&read(&p, &t.join("file.txt"), &t));
+    let p = policy(&c, &cwd, &f.host);
+    assert_ask(&read(&p, &t.join("file.txt"), &cwd));
 }
 
 #[test]
@@ -280,4 +282,16 @@ fn pd_21_worktree_roots_allow_top_checkout() {
     );
     let p = Policy::new(&loaded.config, &cwd, &f.host, &PolicyOptions::default()).unwrap();
     assert_allow(&p.check_path(&doc, &cwd, Access::Read), &doc);
+}
+
+#[test]
+fn perm_13_existing_home_dot_dirs_are_writable() {
+    // TS DEFAULT_CONFIG adds every existing `~/.dir` to write; the facade adds them at build time.
+    let f = fx();
+    let dot = f.host.home.join(".toolrc.d");
+    std::fs::create_dir_all(&dot).unwrap();
+    let cwd = f.root.join("elsewhere");
+    let p = policy(&Default::default(), &cwd, &f.host);
+    assert!(write_access(&p, &dot.join("x"), &cwd).is_allow());
+    assert_ask(&write_access(&p, &f.host.home.join("plain/x"), &cwd));
 }
