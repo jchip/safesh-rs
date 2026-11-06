@@ -335,3 +335,16 @@ fn ses_extra_unknown_keys_preserved() {
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
     assert_eq!(v["other"], 1);
 }
+
+#[test]
+fn session_and_pending_ids_cannot_escape_state_dir() {
+    use safesh_policy::state::temp::{pending_file_path, session_file_path};
+    let t = tempfile::TempDir::new().unwrap();
+    let env = env(t.path());
+    for bad in ["../x", "a/b", "", "a.b"] {
+        assert!(session_file_path(&env, None, bad).is_err(), "{bad}");
+        assert!(pending_file_path(&env, bad).is_err(), "{bad}");
+    }
+    assert!(session_file_path(&env, None, "abc-123_X").is_ok());
+    assert!(pending_file_path(&env, "1730000000000-4242").is_ok());
+}

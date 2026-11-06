@@ -17,6 +17,9 @@ pub enum StateError {
     Json(#[from] serde_json::Error),
     #[error("cannot persist file: {0}")]
     Persist(#[from] tempfile::PersistError),
+    /// Ids become file names, so only `[A-Za-z0-9_-]` is accepted.
+    #[error("invalid id {0:?}")]
+    InvalidId(String),
 }
 
 /// Writes `value` as pretty JSON atomically: temp file in the target dir, then rename.
