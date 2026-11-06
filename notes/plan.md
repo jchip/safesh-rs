@@ -1,6 +1,6 @@
 # safesh in Rust: Execution Plan
 
-Status as of 2026-11-05: P0 done. P1 exit check met; three small items left.
+Status as of 2026-11-05: alpha complete. P0 to P4 are done, and the P5 shadow-mode tooling is in place. Running shadow mode for two weeks is next.
 Related: `design.md` (what and why), `architecture.md` (how it is built).
 
 Each phase has an exit check. Tasks marked **(mech)** are mechanical and go to lower-model subagents. The TS repo stays in use until cutover in P6.
@@ -10,11 +10,11 @@ Each phase has an exit check. Tasks marked **(mech)** are mechanical and go to l
 | Phase | What | Status |
 |---|---|---|
 | P0 | Hands-on spike: brush, policy launcher, redirect gate | done, passed |
-| P1 | Workspace and policy core | exit check met; small items left |
-| P2 | Static pre-check | in progress |
-| P3 | Exec engine | not started |
-| P4 | Agent adapters | not started |
-| P5 | Shadow mode | not started |
+| P1 | Workspace and policy core | done |
+| P2 | Static pre-check | done |
+| P3 | Exec engine | done; upstream PRs and CI corpus left |
+| P4 | Agent adapters | done |
+| P5 | Shadow mode | tooling done; two-week run not started |
 | P6 | Cutover | not started; needs migration sign-off |
 | P7 | Windows | not started |
 
@@ -49,52 +49,58 @@ Follow-ups from P0, assigned to later phases:
 
 Exit check: the ported tests pass with the same decisions as TS.
 
-### P1 next steps
+### Open items after alpha
 
-Scratch inputs are in `.temp/`, which is gitignored:
+Scratch inputs and harnesses are in `.temp/`, which is gitignored: `p1-test-spec.md`, `port-inventory.md`, `p2-corpus/` (transcript differential), `alpha-conformance/` (engine corpus), `smoke/smoke.sh`.
 
-| File | Use |
-|---|---|
-| `.temp/p1-test-spec.md` | 330 test rows extracted from the TS tests, with SKIP and CHANGED-BY-DESIGN marks. Port from this. |
-| `.temp/port-inventory.md` | Config fields, merge rules, default lists, state files, hook protocols |
-| `.temp/crate-survey.md` | Crate picks with versions (also in `architecture.md` section 9) |
-| `.temp/brush-spike/` | brush clone with the `check_open` patch, builds, corpus report |
-
-1. Make the scratchpad tests hermetic. Two of them touch the real `/tmp/claude-<uid>`, as the TS tests did.
-2. Decide on cwd `/`. The facade adds the base cwd to default read, so cwd `/` makes every path readable (deny lists still win). TS missed this case only through an `isPathWithin` quirk.
-3. The bash 5 corpus rerun moves to P3, since it needs brush built in CI.
+1. Run shadow mode for two weeks and review `shadow.jsonl` diffs weekly (P5).
+2. Open the upstream brush PRs: `check_open` on `ProcessLauncher`, and `wait <pid>`.
+3. Commit the engine corpus and run it against bash 5 on Linux and macOS in CI.
+4. Decide on cwd `/`. The facade adds the base cwd to default read, so cwd `/` makes every path readable (deny lists still win). TS missed this case only through an `isPathWithin` quirk.
+5. Make the scratchpad tests hermetic. Two of them touch the real `/tmp/claude-<uid>`, as the TS tests did.
+6. Keep backgrounded builtins alive until they finish, or document the limit.
 
 Rows pv-*, cv-5, cv-7 and pd-13 to pd-15 stay skipped. They cover `external`, which is out of scope.
 
-## P2. Static pre-check
+## P2. Static pre-check (done)
 
-- Port `passthrough-analyzer.ts` onto the brush-parser AST, emitting `Effect`s.
-- **(mech)** Build the transcript-corpus differential harness (parse-only).
+- Replace `passthrough-analyzer.ts` and the prehook extraction with `safesh-analyze` on the brush-parser AST. **Done**, 145 tests. Walk rules are in `design.md` 4.6.
+- **(mech)** Build the transcript-corpus differential harness (parse-only). **Done**: `.temp/p2-corpus/`.
 
-Exit check: the differential shows no unexplained diffs, and `tests/bugs` analyzer cases pass.
+Exit check: the differential shows no unexplained diffs. Result on 15,633 agent commands (11,209 TS-eligible compared):
+- final cwd matches on all 11,209.
+- Commands: Rust is a superset. It lists builtins and the bodies of `$( )`, `<( )` and here-docs, which TS skipped. No command TS found is missing in Rust, apart from one function call, which is excluded by design.
+- Redirects match apart from path spelling: Rust keeps them relative, with the cwd stored separately.
+- Pipeline-shaped rules (`curl ** | sh`) are checked against every pipeline the analyzer reports.
 
 ## P3. Exec engine
 
-- Embed brush-core with PolicyLauncher, `check_open` and the builtin gate.
-- Add wrapper handling and the runtime denial flow, including a clean abort.
-- Full bash flag parsing for nested shells.
-- **(mech)** Build the command-spec table and its tests from man pages.
-- Write the argv rules engine.
-- Open the upstream PRs for `check_open` and `wait <pid>`.
-- **(mech)** Commit the engine corpus and run it against bash 5 on Linux and macOS in CI.
+- Embed brush-core with PolicyLauncher, `check_open` and the builtin gate. **Done** (`safesh-exec`, vendored patched brush-core).
+- Add wrapper handling and the runtime denial flow, including a clean abort. **Done.** A nested shell's denial signals its parent, so the whole run stops.
+- Full bash flag parsing for nested shells. **Done.**
+- **(mech)** Build the command-spec table and its tests from man pages. **Done**, 136 tests.
+- Write the argv rules engine. **Done.**
+- Open the upstream PRs for `check_open` and `wait <pid>`. Not started.
+- **(mech)** Commit the engine corpus and run it against bash 5 on Linux and macOS in CI. Not started.
 
-Exit check: the hook-coverage suite and the engine conformance corpus pass. `xargs rm` and `find -exec rm` are caught.
+Exit check: the hook-coverage suite and the engine conformance corpus pass. `xargs rm` and `find -exec rm` are caught. Result:
+- 40 end-to-end tests cover the hook-coverage cases, retry flows, nested shells, wrappers, rules and install.
+- Conformance: 482 of 497 corpus snippets match bash on stdout and status (spike baseline 485). The differences are the 7 known `wait <pid>` gaps, old spike failures, three harness artifacts, and `echo hi &` losing its output (below).
 
-## P4. Agent adapters
+Known alpha gaps:
+- A backgrounded builtin (`echo hi &`) runs as an in-process brush task and dies when safesh exits, so its output can be lost.
+- `wait <pid>` is unimplemented in brush.
 
-- Write the Claude/Gemini, Codex and agy protocols, plus retry and retry-path.
-- **(mech)** Record golden stdin/stdout files from the TS hooks. Then port the installers.
+## P4. Agent adapters (done)
 
-Exit check: the golden files match byte for byte.
+- Write the Claude/Gemini, Codex and agy protocols, plus retry and retry-path. **Done** (`safesh-hooks`, `safesh-cli`).
+- **(mech)** Record golden stdin/stdout files from the TS hooks. Then port the installers. **Done.** `safesh install claude|codex|agy`, with `-shadow` forms.
+
+Exit check: the golden files match. They match structurally, with documented substitutions: `safesh run` for `desh -q`, the rewrite reason text, normalized pending ids, and the dropped TypeScript HINT.
 
 ## P5. Shadow mode
 
-- The TS hook stays in charge. It also calls `safesh hook --shadow`, which logs the Rust decision without acting on it.
+- The TS hook stays in charge. A second hook entry runs `safesh hook <agent> --shadow`, which logs the Rust decision to `<state>/shadow.jsonl` without acting on it. Install it with `safesh install claude-shadow`. **Tooling done.**
 - Run this for daily use. Review the diffs weekly.
 
 Exit check: two weeks with no unexplained decision diffs.

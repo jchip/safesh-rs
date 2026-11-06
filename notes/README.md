@@ -17,5 +17,4 @@ The TS repo is at `~/dev/safesh`. Port sources live there under `src/core`, `src
 
 ## Status (2026-11-05)
 
-- P0 spike: done and passed.
-- P1 policy core: exit check met. `safesh-policy` has config, paths, project root, scratchpad, session and pending state, and the `deno_permissions` facade, with 273 tests. See `plan.md` for the few items left.
+Alpha complete. The `safesh` binary runs the hook, the pre-check, the embedded bash engine with runtime gates, retry, and install for Claude, Codex and agy. 637 tests pass. Next is a two-week shadow-mode run next to the TS hook (P5). Open items are listed in `plan.md`.
