@@ -272,12 +272,13 @@ impl<'a> Walker<'a> {
             self.out.pipelines.push(Vec::new());
             let mut stages = Some(Vec::new());
             for c in &p.seq {
-                self.isolated(|w| match c {
-                    Command::Simple(sc) => match (w.simple(sc), stages.as_mut()) {
-                        (Some(i), Some(v)) => v.push(i),
-                        _ => stages = None,
-                    },
-                    _ => {
+                self.isolated(|w| {
+                    if let Command::Simple(sc) = c {
+                        match (w.simple(sc), stages.as_mut()) {
+                            (Some(i), Some(v)) => v.push(i),
+                            _ => stages = None,
+                        }
+                    } else {
                         w.command(c);
                         stages = None;
                     }

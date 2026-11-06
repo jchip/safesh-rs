@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use safesh_analyze::{Analysis, AnalyzeOptions, Cwd, OpenKind, Word, analyze};
 use safesh_policy::effect::{Access, Decision};
 use safesh_policy::policy::Problem;
+use safesh_policy::rules::RuleAction;
 
 use crate::context::Context;
 
@@ -78,6 +79,31 @@ pub fn evaluate(ctx: &Context, script: &str) -> Result<Evaluation, String> {
             },
         };
         problems.extend(found.into_iter().map(|p| (name.to_string(), p)));
+    }
+
+    // Pipeline-shaped rules such as `curl ** | sh` need the whole pipeline.
+    for stages in &analysis.pipelines {
+        let argvs: Option<Vec<Vec<String>>> = stages
+            .iter()
+            .map(|&i| {
+                let exec = analysis.execs.get(i)?;
+                exec.argv
+                    .iter()
+                    .map(|w| known(w).map(str::to_string))
+                    .collect()
+            })
+            .collect();
+        let Some(argvs) = argvs else { continue };
+        if let Some(action @ (RuleAction::Ask | RuleAction::Deny)) =
+            ctx.policy.check_pipeline(&argvs)
+        {
+            let what = argvs
+                .iter()
+                .filter_map(|a| a.first().cloned())
+                .collect::<Vec<_>>()
+                .join(" | ");
+            problems.push((what, Problem::Rule { action }));
+        }
     }
 
     for open in &analysis.opens {

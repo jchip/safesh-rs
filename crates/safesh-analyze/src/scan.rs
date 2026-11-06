@@ -110,8 +110,6 @@ pub(crate) fn scan_compound(cc: &CompoundCommand, s: &mut Scan) {
             scan_list(&f.body.list, s);
         }
         CompoundCommand::BraceGroup(b) => scan_list(&b.list, s),
-        // A subshell cannot change the parent's variables or cwd.
-        CompoundCommand::Subshell(_) => {}
         CompoundCommand::ForClause(f) => {
             s.assigned.insert(f.variable_name.clone());
             scan_list(&f.body.list, s);
@@ -138,7 +136,8 @@ pub(crate) fn scan_compound(cc: &CompoundCommand, s: &mut Scan) {
             scan_list(&w.1.list, s);
         }
         CompoundCommand::Coprocess(c) => scan_command(&c.body, s),
-        CompoundCommand::ExtendedTest(_) => {}
+        // A subshell cannot change the parent's variables or cwd; a test changes nothing.
+        CompoundCommand::Subshell(_) | CompoundCommand::ExtendedTest(_) => {}
     }
 }
 
