@@ -1,0 +1,1 @@
+{"conversationId":"c1","stepIdx":3,"toolCall":{"name":"run_command","args":{"CommandLine":"desh retry --id=1-2 --choice=1","Cwd":"/work"}}}

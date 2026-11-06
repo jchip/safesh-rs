@@ -1750,9 +1750,11 @@ dependencies = [
 name = "safesh-hooks"
 version = "0.1.0"
 dependencies = [
+ "fs-err",
  "safesh-policy",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 

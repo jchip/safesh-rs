@@ -1,0 +1,1 @@
+{"session_id":"s1","cwd":"/work","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"for f in $(ls); do echo $f; done","timeout":5000,"run_in_background":true}}

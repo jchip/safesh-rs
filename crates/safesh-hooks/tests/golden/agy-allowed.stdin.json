@@ -1,0 +1,1 @@
+{"conversationId":"c1","stepIdx":3,"toolCall":{"name":"run_command","args":{"CommandLine":"ls","Cwd":"/work"}}}

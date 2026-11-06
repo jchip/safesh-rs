@@ -13,3 +13,7 @@ safesh-policy = { path = "../safesh-policy" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+fs-err.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
