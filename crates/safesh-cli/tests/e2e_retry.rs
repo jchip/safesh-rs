@@ -69,9 +69,9 @@ fn retry_rejects_bad_choice() {
     assert_eq!(r.code, 1);
 }
 
-/// A write outside the project but inside the temp root: blocked, then granted by retry-path.
+/// A write to a dir on no allow list: blocked, then granted by retry-path.
 fn outside_write(e: &Env, name: &str) -> (String, std::path::PathBuf) {
-    let dir = e.root.join("outside");
+    let dir = e.outside.clone();
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join(name);
     (format!("echo data > {}", f.display()), f)
@@ -151,7 +151,7 @@ fn retry_path_bad_choice_fails() {
 #[test]
 fn runtime_block_offers_retry_that_resumes() {
     let e = Env::new();
-    let dir = e.root.join("outside");
+    let dir = e.outside.clone();
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join("rt.txt");
     let script = format!("x=$(echo touch); $x {}; echo after", f.display());

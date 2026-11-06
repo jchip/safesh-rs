@@ -9,7 +9,11 @@ use std::io::Write as _;
 
 pub struct Env {
     _td: tempfile::TempDir,
+    _outside: tempfile::TempDir,
     pub root: PathBuf,
+    /// A writable dir on no allow list. The temp root itself can sit under `/tmp` (Linux),
+    /// which is writable by default, so this lives under cargo's per-crate target dir.
+    pub outside: PathBuf,
     pub home: PathBuf,
     pub state: PathBuf,
     pub proj: PathBuf,
@@ -84,8 +88,15 @@ impl Env {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(root.join("tmp")).unwrap();
         std::fs::create_dir_all(proj.join(".git")).unwrap();
+        let out_td = tempfile::Builder::new()
+            .prefix("outside")
+            .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+            .expect("outside tempdir");
+        let outside = out_td.path().canonicalize().expect("canonicalize");
         Self {
             _td: td,
+            _outside: out_td,
+            outside,
             root,
             home,
             state,

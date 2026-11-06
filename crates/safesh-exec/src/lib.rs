@@ -101,7 +101,11 @@ impl PolicyLauncher {
         args.append(&mut req.args);
         req.args = args;
         req.argv0 = "safesh".into();
-        let parent = (ENV_PARENT_PID.to_string(), std::process::id().to_string());
+        let chain = match std::env::var(ENV_PARENT_PIDS) {
+            Ok(c) if !c.is_empty() => format!("{c}:{}", std::process::id()),
+            _ => std::process::id().to_string(),
+        };
+        let parent = (ENV_PARENT_PIDS.to_string(), chain);
         for (k, v) in ctx.nested_env.iter().chain(std::iter::once(&parent)) {
             req.env.retain(|(ek, _)| ek != k);
             req.env.push((k.clone(), v.clone()));
@@ -109,8 +113,8 @@ impl PolicyLauncher {
     }
 }
 
-/// Set on nested shells: pid of the safesh that started them.
-const ENV_PARENT_PID: &str = "SAFESH_PARENT_PID";
+/// Set on nested shells: pids of every safesh above them, outermost first, `:`-separated.
+const ENV_PARENT_PIDS: &str = "SAFESH_PARENT_PIDS";
 
 /// Prints the denial and stops the run. Children in a pipeline see a closed pipe and exit.
 fn abort(message: &str) -> io::Error {
@@ -118,39 +122,31 @@ fn abort(message: &str) -> io::Error {
     let mut err = io::stderr().lock();
     let _ = writeln!(err, "{message}");
     let _ = err.flush();
-    stop_run()
-}
-
-/// Stops this process and every safesh above it in a nested-shell chain.
-fn stop_run() -> ! {
-    signal_parent();
+    // A nested shell's denial must stop every safesh above it, not just this child.
+    for pid in parent_pids() {
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::USR1);
+    }
     std::process::exit(i32::from(DENIED_STATUS));
 }
 
-/// A nested shell's denial must stop the parent script too, not just this child.
-fn signal_parent() {
-    let Some(pid) = std::env::var(ENV_PARENT_PID)
-        .ok()
-        .and_then(|p| p.parse::<i32>().ok())
-        .and_then(rustix::process::Pid::from_raw)
-    else {
-        return;
-    };
-    let _ = rustix::process::kill_process(pid, rustix::process::Signal::USR1);
+fn parent_pids() -> Vec<rustix::process::Pid> {
+    std::env::var(ENV_PARENT_PIDS)
+        .unwrap_or_default()
+        .split(':')
+        .filter_map(|p| p.parse::<i32>().ok())
+        .filter_map(rustix::process::Pid::from_raw)
+        .collect()
 }
 
-/// A nested shell signals SIGUSR1 when policy stops it; stop this run as well.
-fn listen_for_child_denial() {
-    let Ok(mut sig) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
-    else {
-        return;
-    };
-    tokio::spawn(async move {
-        if sig.recv().await.is_some() {
-            let _ = io::stdout().flush();
-            stop_run();
-        }
-    });
+/// SIGUSR1 from a denied nested shell exits this process with status 126 right in the signal
+/// handler, so no later command of this script can run first.
+fn exit_on_child_denial() {
+    let always = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let _ = signal_hook::flag::register_conditional_shutdown(
+        signal_hook::consts::SIGUSR1,
+        i32::from(DENIED_STATUS),
+        always,
+    );
 }
 
 impl ProcessLauncher for PolicyLauncher {
@@ -197,7 +193,7 @@ pub async fn run(config: RunConfig, gate: Arc<dyn Gate>) -> Result<u8, ExecError
         self_exe,
         nested_env,
     } = config;
-    listen_for_child_denial();
+    exit_on_child_denial();
     let launcher = PolicyLauncher {
         ctx: Some(Arc::new(Ctx {
             gate,
