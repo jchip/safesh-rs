@@ -4,7 +4,7 @@
 
 use std::path::Path;
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::{Channel, Choice, Env, Prompt, body_lines, choice_from_label, numbered_labels, proc};
 
@@ -12,6 +12,9 @@ pub struct Gui;
 
 impl Channel for Gui {
     fn available(&self, env: &Env) -> bool {
+        if tmux_client_over_ssh(env) {
+            return false;
+        }
         if env.macos {
             return !env.over_ssh() && env.find_bin("osascript").is_some();
         }
@@ -33,6 +36,23 @@ impl Channel for Gui {
         };
         choice_from_label(&prompt.request, &proc::run(cmd, deadline)?)
     }
+}
+
+/// Inside tmux our SSH vars can be stale. tmux copies `SSH_CONNECTION` from each attaching
+/// client into the session env (default `update-environment`), so ask tmux instead.
+/// Any tmux error keeps the env-var checks as the only signal.
+fn tmux_client_over_ssh(env: &Env) -> bool {
+    let (Some(_), Some(tmux)) = (env.var("TMUX"), env.find_bin("tmux")) else {
+        return false;
+    };
+    let mut cmd = Command::new(tmux);
+    cmd.arg("show-environment");
+    if let Some(pane) = env.var("TMUX_PANE") {
+        cmd.args(["-t", pane]);
+    }
+    cmd.arg("SSH_CONNECTION");
+    proc::run(cmd, Instant::now() + Duration::from_millis(500))
+        .is_some_and(|out| out.starts_with("SSH_CONNECTION="))
 }
 
 fn text(prompt: &Prompt) -> String {
@@ -228,11 +248,21 @@ mod tests {
     }
 
     fn env(macos: bool, vars: &[(&str, &str)], bins: &[&str]) -> (Env, tempfile::TempDir) {
+        let bins: Vec<(&str, &str)> = bins.iter().map(|b| (*b, "")).collect();
+        env_with(macos, vars, &bins)
+    }
+
+    /// Like `env`, with each bin given its file content.
+    fn env_with(
+        macos: bool,
+        vars: &[(&str, &str)],
+        bins: &[(&str, &str)],
+    ) -> (Env, tempfile::TempDir) {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        for b in bins {
+        for (b, body) in bins {
             let p = dir.path().join(b);
-            std::fs::write(&p, "").unwrap();
+            std::fs::write(&p, body).unwrap();
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let vars: HashMap<String, String> = vars
@@ -262,5 +292,28 @@ mod tests {
         assert!(ok(false, &[("DISPLAY", ":0")], &["zenity"]));
         assert!(ok(false, &[("WAYLAND_DISPLAY", "w")], &["kdialog"]));
         assert!(!ok(false, &[("DISPLAY", ":0")], &[]));
+    }
+
+    #[test]
+    fn tmux_client_over_ssh_blocks_gui() {
+        let tmux = |out: &str| format!("#!/bin/sh\nprintf '%s\\n' '{out}'\n");
+        let in_tmux = [("TMUX", "/tmp/tmux-1/default,1,0"), ("TMUX_PANE", "%1")];
+        let ok = |macos, vars: &[(&str, &str)], tmux_out: &str| {
+            let dialog = if macos { "osascript" } else { "zenity" };
+            let t = tmux(tmux_out);
+            Gui.available(&env_with(macos, vars, &[(dialog, ""), ("tmux", &t)]).0)
+        };
+        let ssh = "SSH_CONNECTION=1.2.3.4 5 6.7.8.9 22";
+        assert!(!ok(true, &in_tmux, ssh));
+        assert!(ok(true, &in_tmux, "-SSH_CONNECTION"));
+        // Not inside tmux: tmux is never asked.
+        assert!(ok(true, &[], ssh));
+        let linux = [in_tmux[0], in_tmux[1], ("DISPLAY", ":0")];
+        assert!(!ok(false, &linux, ssh));
+        assert!(ok(false, &linux, "-SSH_CONNECTION"));
+        // A failing tmux leaves the env-var checks in charge.
+        let fail = "#!/bin/sh\nexit 1\n";
+        let e = env_with(true, &in_tmux, &[("osascript", ""), ("tmux", fail)]);
+        assert!(Gui.available(&e.0));
     }
 }

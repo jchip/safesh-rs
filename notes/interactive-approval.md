@@ -31,7 +31,7 @@ safesh tries channels in order and uses the first one that is available. If none
 |---|---|---|---|
 | 1 | Agent-native "ask" | the hook runs as `safesh hook claude` | pre-check only |
 | 2 | tmux popup | `$TMUX` and `$TMUX_PANE` are set in the hook env | pre-check and runtime |
-| 3 | GUI dialog | macOS, not over SSH; Linux with `$DISPLAY` or `$WAYLAND_DISPLAY` and `zenity` or `kdialog` | pre-check and runtime |
+| 3 | GUI dialog | macOS, not over SSH; Linux with `$DISPLAY` or `$WAYLAND_DISPLAY` and `zenity` or `kdialog`; never when the tmux client is over SSH | pre-check and runtime |
 | 4 | Text (today) | always | pre-check and runtime |
 
 Channel details:
@@ -39,6 +39,7 @@ Channel details:
 - **tmux:** `tmux display-popup -E -t "$TMUX_PANE" -- safesh approve-ui --id <pending>`. The popup runs a small safesh TUI that reads one choice and writes it to the pending file. Kitty, WezTerm and Zellij floating panes are possible later channels of the same kind.
 - **macOS GUI:** `osascript` with `choose from list` for the five choices (`display dialog` allows only three buttons). The command text goes in as an argv item (`on run argv`), never spliced into AppleScript source.
 - **Linux GUI:** `zenity --list --radiolist`, or `kdialog --radiolist`.
+- **GUI over SSH:** inside tmux, the hook's SSH vars can be stale. So the GUI check also runs `tmux show-environment SSH_CONNECTION` for the pane's session. tmux sets that var from the last client that attached. If it is set, the GUI channel is unavailable.
 
 ## 4. Where approval happens
 
