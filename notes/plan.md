@@ -14,7 +14,7 @@ Each phase has an exit check. Tasks marked **(mech)** are mechanical and go to l
 | P2 | Static pre-check | done |
 | P3 | Exec engine | done; upstream PRs and CI corpus left |
 | P4 | Agent adapters | done |
-| P5 | Shadow mode | tooling done; two-week run not started |
+| P5 | Shadow mode | tooling done; field test with Rust in charge started 2026-11-06 |
 | P6 | Cutover | not started; needs migration sign-off |
 | P7 | Windows | not started |
 
@@ -102,6 +102,7 @@ Exit check: the golden files match. They match structurally, with documented sub
 
 - The TS hook stays in charge. A second hook entry runs `safesh hook <agent> --shadow`, which logs the Rust decision to `<state>/shadow.jsonl` without acting on it. Install it with `safesh install claude-shadow`. **Tooling done.**
 - Run this for daily use. Review the diffs weekly.
+- Field test, started 2026-11-06: on the author's Claude Code, the Rust hook replaced the TS hook. This covers the approval channels and runtime gates, which shadow mode can't. Check with `ps -o command= -p $$`, which prints `safesh run --id ...`. Roll back with `~/.claude/settings.json.bak-ts-hook`.
 
 Exit check: two weeks with no unexplained decision diffs.
 
