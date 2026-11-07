@@ -19,6 +19,6 @@ The TS repo is at `~/dev/safesh`. Port sources live there under `src/core`, `src
 | `rust-shell-spike.html` | Visual summary of the final design (published artifact) |
 | `archive/` | Superseded docs. `rust-runner-design.md` was split into the three docs above. |
 
-## Status (2026-11-05)
+## Status (2026-11-06)
 
-Alpha complete. The `safesh` binary runs the hook, the pre-check, the embedded bash engine with runtime gates, retry, and install for Claude, Codex and agy. 692 tests pass. Next is a two-week shadow-mode run next to the TS hook (P5). Open items are listed in `plan.md`.
+Alpha complete. The `safesh` binary runs the hook, the pre-check, the embedded bash engine with runtime gates, retry, and install for Claude, Codex and agy. 692 tests pass. The P5 shadow-mode tooling is in place. A field test with the Rust hook in charge started on 2026-11-06. Open items are listed in `plan.md`.
