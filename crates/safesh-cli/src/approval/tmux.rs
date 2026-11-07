@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use super::{Channel, Choice, Env, Prompt, body_lines, files, proc};
+use super::{Channel, Choice, Env, Prompt, files, proc, ui};
 use crate::hook::sh_quote;
 
 pub struct Tmux;
@@ -38,7 +38,6 @@ fn popup_cmd(tmux: &Path, env: &Env, prompt: &Prompt, pane: &str, deadline: Inst
         .unwrap_or_default()
         .saturating_add(left)
         .as_millis();
-    let rows = body_lines(prompt).len() + prompt.request.choices().len() + 6;
     // A single shell string: tmux runs it with `sh -c`, so every part is quoted.
     let inner = [
         env.exe.to_string_lossy().as_ref(),
@@ -53,8 +52,12 @@ fn popup_cmd(tmux: &Path, env: &Env, prompt: &Prompt, pane: &str, deadline: Inst
     .map(sh_quote)
     .join(" ");
     let mut cmd = Command::new(tmux);
-    cmd.args(["display-popup", "-E", "-t", pane, "-w", "90", "-h"])
-        .arg(rows.min(30).to_string())
-        .args(["-T", " safesh approval ", &inner]);
+    cmd.args(["display-popup", "-E", "-t", pane, "-w"])
+        .arg(ui::POPUP_WIDTH.to_string())
+        .arg("-h")
+        .arg(ui::popup_rows(prompt).to_string())
+        .arg("-T")
+        .arg(format!(" {} ", prompt.request.title()))
+        .arg(&inner);
     cmd
 }

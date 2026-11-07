@@ -148,6 +148,7 @@ mod tests {
             request: Request::Path {
                 path: "/etc/x".into(),
                 op: PathOperation::Read,
+                command: Some("cat /etc/x".into()),
             },
         }
     }

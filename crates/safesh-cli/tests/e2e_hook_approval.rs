@@ -15,9 +15,10 @@ for a in "$@"; do
   if [ "$a" = "-C" ]; then echo close >> "$FAKE_LOG"; exit 0; fi
 done
 for last; do :; done
+for a in "$@"; do echo "$a" >> "$FAKE_LOG.args"; done
 echo "start" >> "$FAKE_LOG"
 [ -n "$FAKE_DELAY" ] && sleep "$FAKE_DELAY"
-sh -c "$last" < "$FAKE_INPUT"
+sh -c "$last" < "$FAKE_INPUT" >> "$FAKE_LOG.screen"
 echo "end" >> "$FAKE_LOG"
 "#;
 
@@ -59,6 +60,12 @@ impl T {
 
     fn log(&self) -> String {
         fs::read_to_string(&self.log).unwrap_or_default()
+    }
+
+    /// The fake popup's args (one per line) and what it showed.
+    fn popup(&self) -> (String, String) {
+        let read = |ext: &str| fs::read_to_string(self.log.with_extension(ext)).unwrap_or_default();
+        (read("args"), read("screen"))
     }
 
     fn hook_with(&self, args: &[&str], command: &str, session: &str, env: &[(&str, &str)]) -> Hook {
@@ -254,6 +261,17 @@ fn path_write_once_runs() {
     let cmd = h.command();
     assert!(cmd.contains("--pending "), "{} {}", h.stdout, h.stderr);
     assert!(t.log().contains("start"));
+    let (args, screen) = t.popup();
+    assert!(
+        args.lines()
+            .any(|a| a == " safesh: allow writing this path? "),
+        "{args}"
+    );
+    assert!(
+        screen.contains(&format!("path: {}", f.display())),
+        "{screen}"
+    );
+    assert!(screen.contains("command: echo outside-data > "), "{screen}");
     assert!(!f.exists());
     let r = t.e.sh(&cmd);
     assert_eq!(r.code, 0, "{}", r.stderr);

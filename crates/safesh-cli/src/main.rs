@@ -95,7 +95,7 @@ enum Cmd {
     ApproveAsk {
         #[arg(long)]
         id: String,
-        /// Commands to approve. Ignored when `--path` is set.
+        /// Commands to approve. With `--path`, the first one is shown as the path's command.
         #[arg(long = "command")]
         commands: Vec<String>,
         #[arg(long)]
@@ -168,6 +168,7 @@ fn main() -> ExitCode {
                     } else {
                         PathOperation::Read
                     },
+                    command: commands.into_iter().next(),
                 },
                 None => approval::Request::Command { commands },
             };

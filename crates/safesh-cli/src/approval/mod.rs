@@ -21,8 +21,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum Request {
-    Command { commands: Vec<String> },
-    Path { path: String, op: PathOperation },
+    Command {
+        commands: Vec<String>,
+    },
+    Path {
+        path: String,
+        op: PathOperation,
+        /// The agent's command that touches the path, shown for context.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,12 +119,16 @@ pub fn choice_from_label(req: &Request, label: &str) -> Option<Choice> {
 const MAX_LINE: usize = 200;
 const MAX_LINES: usize = 8;
 
-/// Body text: the agent's commands or path, plain, one per line, truncated.
+/// Body text: the agent's commands, or the path and its command. Plain and truncated.
 #[must_use]
 pub fn body_lines(prompt: &Prompt) -> Vec<String> {
     let items: Vec<String> = match &prompt.request {
         Request::Command { commands } => commands.clone(),
-        Request::Path { path, .. } => vec![path.clone()],
+        Request::Path { path, command, .. } => {
+            let mut v = vec![format!("path: {path}")];
+            v.extend(command.iter().map(|c| format!("command: {c}")));
+            v
+        }
     };
     let mut out: Vec<String> = items
         .iter()

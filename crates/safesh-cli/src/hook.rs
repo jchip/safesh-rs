@@ -248,7 +248,7 @@ fn answered(
                 scope,
             )
         }
-        Request::Path { path, op } => {
+        Request::Path { path, op, .. } => {
             let paths = vec![path.clone()];
             if *op == PathOperation::Read {
                 grant.read = paths;
@@ -351,6 +351,7 @@ fn block(ctx: &Context, ev: &Evaluation, id: &str, input: &HookInput) -> Blocked
                     request: Request::Path {
                         path: pending.path.clone(),
                         op: pending.operation,
+                        command: Some(input.command.clone()),
                     },
                 }),
             },
