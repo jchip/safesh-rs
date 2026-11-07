@@ -1,6 +1,6 @@
 # safesh in Rust: Execution Plan
 
-Status as of 2026-11-05: alpha complete. P0 to P4 are done, and the P5 shadow-mode tooling is in place. Running shadow mode for two weeks is next.
+Status as of 2026-11-06: alpha complete. P0 to P4 are done, and the P5 shadow-mode tooling is in place. A field test with the Rust hook in charge started on 2026-11-06.
 Related: `design.md` (what and why), `architecture.md` (how it is built).
 
 Each phase has an exit check. Tasks marked **(mech)** are mechanical and go to lower-model subagents. The TS repo stays in use until cutover in P6.
