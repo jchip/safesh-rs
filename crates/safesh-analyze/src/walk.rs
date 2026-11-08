@@ -16,6 +16,7 @@ use crate::path::{is_device, normalize};
 use crate::scan::{Scan, assignment_name, literal, scan_compound, scan_list};
 use crate::words::Mode;
 use crate::{Access, Analysis, AnalyzeOptions, Cwd, Exec, Open, OpenKind, Word};
+use safesh_policy::paths::{is_absolute_str, resolve_lexical};
 
 type Vars = BTreeMap<String, Option<String>>;
 
@@ -769,7 +770,7 @@ impl<'a> Walker<'a> {
         }
         match args.get(i) {
             None => match self.var_value("HOME") {
-                Some(h) if h.starts_with('/') => self.set_cwd(&h),
+                Some(h) if safesh_policy::paths::is_absolute_str(&h) => self.set_cwd(&h),
                 _ => self.lose_cwd(),
             },
             Some(Word::Known(p)) if p != "-" => {
@@ -782,6 +783,17 @@ impl<'a> Walker<'a> {
 
     fn set_cwd(&mut self, target: &str) {
         if target.is_empty() {
+            return;
+        }
+        if cfg!(windows) {
+            // `/c/Users` is not absolute to Windows, so map it the way the engine will.
+            let apply = |cur: &Cwd| match cur {
+                _ if is_absolute_str(target) => Cwd::Known(resolve_lexical("", target).into()),
+                Cwd::Known(c) => Cwd::Known(resolve_lexical(&c.to_string_lossy(), target).into()),
+                Cwd::Unknown => Cwd::Unknown,
+            };
+            self.cwd = apply(&self.cwd);
+            self.ocwd = apply(&self.ocwd);
             return;
         }
         let apply = |cur: &Cwd| match cur {

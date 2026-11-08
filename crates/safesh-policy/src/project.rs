@@ -26,6 +26,9 @@ impl Default for FindProjectRootOptions {
 }
 
 fn is_within_root(path: &str, root: &str) -> bool {
+    if cfg!(windows) {
+        return crate::winpath::is_within(path, root);
+    }
     path == root || path.strip_prefix(root).is_some_and(|r| r.starts_with('/'))
 }
 
@@ -57,7 +60,7 @@ fn read_git_dir_path(worktree_root: &str, git_marker: &str) -> Option<String> {
     }
     let content = fs_err::read_to_string(git_marker).ok()?;
     let raw = parse_gitdir_file(&content)?;
-    Some(if raw.starts_with('/') {
+    Some(if crate::paths::is_absolute_str(&raw) {
         raw
     } else {
         resolve_lexical(worktree_root, &raw)
@@ -65,6 +68,11 @@ fn read_git_dir_path(worktree_root: &str, git_marker: &str) -> Option<String> {
 }
 
 fn top_worktree_from_git_dir(git_dir: &str) -> Option<String> {
+    if cfg!(windows) {
+        // Git writes `gitdir:` with `/` on Windows. Search one spelling.
+        let g = crate::winpath::normalize(git_dir);
+        return g.rfind(r"\.git\worktrees\").map(|i| g[..i].to_string());
+    }
     git_dir
         .rfind("/.git/worktrees/")
         .map(|i| git_dir[..i].to_string())

@@ -83,12 +83,12 @@ impl PolicyLauncher {
         let Some(ctx) = self.ctx.as_deref() else {
             return;
         };
-        let name = req
-            .program
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        if !matches!(name, "bash" | "sh" | "dash") {
+        // Windows: `C:\Git\usr\bin\bash.exe` is `bash`, so it is rerouted too.
+        let is_shell = matches!(
+            safesh_policy::paths::command_name(&req.program.to_string_lossy()),
+            "bash" | "sh" | "dash"
+        );
+        if !is_shell {
             return;
         }
         req.program.clone_from(&ctx.self_exe);
@@ -169,6 +169,10 @@ impl ProcessLauncher for PolicyLauncher {
         }
         self.reroute_shell(&mut request);
         DefaultProcessLauncher.exec(request)
+    }
+
+    fn host_path(&self, path: &Path) -> Option<std::path::PathBuf> {
+        safesh_policy::paths::host_path(path)
     }
 
     fn check_open(&self, path: &Path, write: bool) -> Result<(), io::Error> {

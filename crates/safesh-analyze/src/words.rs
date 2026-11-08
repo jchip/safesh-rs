@@ -100,7 +100,7 @@ impl Walker<'_> {
                 self.pieces(inner, true, mode, r);
             }
             WordPiece::TildeExpansion(word::TildeExpr::Home) => match self.var_value("HOME") {
-                Some(h) if h.starts_with('/') => r.text.push_str(&h),
+                Some(h) if safesh_policy::paths::is_absolute_str(&h) => r.text.push_str(&h),
                 _ => r.unknown = true,
             },
             WordPiece::TildeExpansion(_) => r.unknown = true,

@@ -14,3 +14,4 @@ pub mod rules;
 pub mod scratchpad;
 pub mod spec;
 pub mod state;
+pub mod winpath;

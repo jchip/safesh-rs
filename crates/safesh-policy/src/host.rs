@@ -28,8 +28,10 @@ impl HostEnv {
     pub fn from_process() -> Self {
         let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty());
         Self {
-            home: var("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from),
-            tmpdir: var("TMPDIR").map(PathBuf::from),
+            home: home(&var).unwrap_or_else(|| PathBuf::from("/")),
+            tmpdir: var("TMPDIR")
+                .or_else(|| if cfg!(windows) { var("TEMP") } else { None })
+                .map(PathBuf::from),
             xdg_config_home: var("XDG_CONFIG_HOME").map(PathBuf::from),
             path: var("PATH"),
             claude_project_dir: var("CLAUDE_PROJECT_DIR").map(PathBuf::from),
@@ -38,8 +40,30 @@ impl HostEnv {
             // SPIKE(windows): no uid; 0 never matches a real claude-<uid> dir check.
             #[cfg(not(unix))]
             uid: 0,
-            state_dir: var("SAFESH_STATE_DIR")
-                .map_or_else(|| PathBuf::from("/tmp/safesh"), PathBuf::from),
+            state_dir: var("SAFESH_STATE_DIR").map_or_else(default_state_dir, PathBuf::from),
         }
+    }
+}
+
+/// `$HOME`. On Windows a Git Bash spelling (`/c/Users/me`) is mapped, and `USERPROFILE` is the
+/// fallback, since a native process may not get `HOME` at all.
+fn home(var: &impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let home = var("HOME").map(PathBuf::from);
+    if !cfg!(windows) {
+        return home;
+    }
+    home.and_then(|h| match crate::paths::host_path(&h) {
+        Some(mapped) => Some(mapped),
+        None => crate::winpath::is_absolute(&h.to_string_lossy()).then_some(h),
+    })
+    .or_else(|| var("USERPROFILE").map(PathBuf::from))
+}
+
+/// `/tmp/safesh`. On Windows that would be `C:\tmp\safesh`, so the user temp dir is used instead.
+fn default_state_dir() -> PathBuf {
+    if cfg!(windows) {
+        std::env::temp_dir().join("safesh")
+    } else {
+        PathBuf::from("/tmp/safesh")
     }
 }

@@ -75,7 +75,7 @@ fn simple(sc: &SimpleCommand, found: &mut bool) -> bool {
     let Some(words) = literal_words(sc) else {
         return false;
     };
-    let base = words[0].rsplit('/').next().unwrap_or(&words[0]);
+    let base = safesh_policy::paths::command_name(&words[0]);
     let args = &words[1..];
     if base == "cd" {
         return args.len() == 1;

@@ -86,6 +86,13 @@ fn pipeline_matches(pats: &[&[String]], stages: &[Vec<String>]) -> bool {
     })
 }
 
+/// The basename rule: `/usr/bin/git` matches `git`. On Windows `C:\Git\cmd\git.exe` and `git.EXE`
+/// match too.
+fn command_name_differs(tok: &str, head: &str) -> bool {
+    let name = crate::paths::command_name(tok);
+    name != tok && glob_match(head, name)
+}
+
 /// Prefix match. `first` enables the basename rule for the leading element.
 fn match_prefix(pat: &[String], argv: &[String], first: bool) -> bool {
     let Some((head, rest)) = pat.split_first() else {
@@ -97,8 +104,7 @@ fn match_prefix(pat: &[String], argv: &[String], first: bool) -> bool {
     let Some((tok, tail)) = argv.split_first() else {
         return false;
     };
-    let ok = glob_match(head, tok)
-        || (first && tok.contains('/') && glob_match(head, tok.rsplit('/').next().unwrap_or(tok)));
+    let ok = glob_match(head, tok) || (first && command_name_differs(tok, head));
     ok && match_prefix(rest, tail, false)
 }
 

@@ -6,7 +6,7 @@ Shell under test: Git Bash, the shell Claude Code's Bash tool uses on Windows.
 
 ## Verdict
 
-Native Windows is reachable. The workspace builds for `x86_64-pc-windows-msvc` after small shims, and the brush engine runs scripts. It is not usable yet. MSYS-to-Windows path translation is missing, so the runtime gate blocks almost every external command, and file paths resolve to the wrong place. That one piece of work comes before anything else in P7.
+Native Windows is reachable. The workspace builds for `x86_64-pc-windows-msvc` after small shims, and the brush engine runs scripts. In the first pass it was not usable: Git Bash path translation was missing, so the runtime gate blocked almost every external command, and file paths resolved to the wrong place. Items 1 and 2 in section 3 fix that; see section 5. Under Git Bash, common scripts now run and are gated the same way as on macOS.
 
 WSL2 was not tested. The WSL Rust is 1.88, and the workspace needs 1.89 (`File::try_lock`).
 
@@ -41,8 +41,8 @@ Tests: the 20 lib and bin unit tests pass on Windows. Eight integration-test fil
 
 ## 3. Gaps, in order
 
-1. **Exe matching.** `is_resolved_allowed_name` (`policy.rs:355`) compares the basename `ls.exe` with the rule `ls`. Strip the PATHEXT extension and compare case-insensitively. This is the item in `design.md` section 7.
-2. **MSYS paths.** Git Bash hands safesh `/c/...`, `/tmp` (which is `%LOCALAPPDATA%\Temp`), `/usr/bin` (which is `C:\Program Files\Git\usr\bin`) and `HOME=/c/Users/...`. Policy needs one translation step, `cygpath` rules or the mount table, before `normalize_lexical`. Without it, `~` and every absolute path are wrong. This is the biggest piece.
+1. **Exe matching.** *(Fixed, see section 5.)* `is_resolved_allowed_name` (`policy.rs:355`) compares the basename `ls.exe` with the rule `ls`. Strip the PATHEXT extension and compare case-insensitively. This is the item in `design.md` section 7.
+2. **MSYS paths.** *(Fixed, see section 5.)* Git Bash hands safesh `/c/...`, `/tmp` (which is `%LOCALAPPDATA%\Temp`), `/usr/bin` (which is `C:\Program Files\Git\usr\bin`) and `HOME=/c/Users/...`. Policy needs one translation step, `cygpath` rules or the mount table, before `normalize_lexical`. Without it, `~` and every absolute path are wrong. This is the biggest piece.
 3. **Nested denial.** A denied `bash -c` exits 126, and the outer script keeps going. Replace SIGUSR1 with `OpenProcess` plus `TerminateProcess(pid, 126)` on `SAFESH_PARENT_PIDS`.
 4. **State-dir protection.** With no mode bits, approval and once-grant files inherit the parent's ACL. The deny-write list still guards them from the agent's shell, but other local users are not kept out. That needs an owner-only DACL.
 5. **Scratchpad trust.** Claude Code's Windows scratchpad layout and ownership check are unknown. Trust is off for now, which fails closed.
@@ -54,3 +54,41 @@ Tests: the 20 lib and bin unit tests pass on Windows. Eight integration-test fil
 - A real Claude Code session on Windows with the hook installed. `safesh install claude` wasn't run, so Legion's Claude settings are untouched.
 - WSL2: needs Rust 1.89 or later in the Ubuntu-24.04 distro. The WSL `rustup` binary is missing, and both toolchains are 1.88.
 - ARM64 Windows, UNC paths, and the PowerShell tool.
+
+## 5. Items 1 and 2 fixed
+
+Policy and engine read every path through one translator, `safesh_policy::winpath`. It is pure string code, tested on every platform, and `paths` calls it only on Windows.
+
+- **Translation:** `/c/x` becomes `C:\x`, `/tmp` becomes `%TEMP%`, `/` and `/bin` become the Git install, matching `cygpath`. `/dev/*` keeps its spelling, so device checks still match. The Git root is `C:\Program Files\Git` when it holds `usr\bin\msys-2.0.dll`, and only after that `EXEPATH` or `SHELL`, which the agent's shell can set.
+- **Windows path rules:** drive and UNC prefixes, both separators, `\\?\` dropped from canonical paths, and case-insensitive containment. `normalize_lexical`, `resolve_lexical` and `is_path_within` send Windows paths here.
+- **Engine:** a new brush hook, `ProcessLauncher::host_path`, maps a path inside `Shell::absolute_path`. Redirects, `source`, `cd` and `test` go through it, so brush opens the file the policy checked. `check_open` now gets the absolute path that `open_file` opens. The patch is `vendor/brush-host-path.patch`, applied on top of `brush-check-open.patch`.
+- **Command names:** `paths::command_name` drops the dir and a `PATHEXT` extension. It is used by D2 PATH matching, argv rules, command specs, the analyzer and nested-shell rerouting. deno's `which` now gets `PATHEXT`. Paths with `\` count as paths.
+- **Host env:** `HOME` falls back to `USERPROFILE`, `TEMP` stands in for `TMPDIR`, and the state dir defaults to `%TEMP%\safesh`.
+
+Found along the way, and fixed:
+- **Nested shells escaped the policy.** Rerouting matched `bash`, not `bash.exe`, so `bash -c "..."` ran the real Git Bash unchecked. It is now rerouted, and `bash -c "notepad.exe"` is blocked.
+- **`rm -rf ~` was allowed.** `HOME` (`C:\Users\me`) was read as a relative path and joined under the project. It now asks.
+- `rsync`/`scp` took `C:\x` for host `C`, so the path skipped local checks. On Windows a drive path is now local.
+- The analyzer's `cd` and device checks used `Path::is_absolute`, which is false for `/c/x` and `/dev/null` on Windows.
+
+Verified on Legion in Git Bash, through `hook claude` then `run`:
+
+| Case | Result |
+|---|---|
+| `ls`, `cat \| wc`, `git status`, `git log` | run |
+| `echo > /tmp/f && cat /tmp/f` | file in `%TEMP%`, not `C:\tmp` |
+| `... > /dev/null` | works |
+| `cd /c/Users && pwd` | `C:\Users`, and the `cd` rewrite is right |
+| `rm -rf ~` | `ask` on `C:\Users\joel1` |
+| `d=$(echo /c/Windows); echo x > "$d/f"` and `rm -f "$d/f"` | blocked at runtime as `C:\Windows\f`, rc 126, no file written |
+| rule `git push` deny vs `g=git.exe; $g push` | denied by the rule. `git.EXE status` matches an `ask` rule |
+| `bash -c "notepad.exe"` | blocked inside the nested shell |
+
+macOS: all 701 tests pass and clippy is clean. Windows: unit tests and clippy are clean.
+
+Still open:
+- **Arguments to native programs aren't converted.** Git Bash rewrites `/c/x` in arguments for native exes such as `git.exe` and `cargo.exe`, and brush does not. Policy checks `C:\x`, while a native program sees `/c/x` and reads it as `C:\c\x`. MSYS programs such as coreutils `rm` and `ls` read it the way policy does.
+- A path command spelled `/usr/bin/ls` isn't mapped. brush resolves it outside `absolute_path`.
+- Globs over Git Bash paths (`/c/Users/*`) were not tried.
+- **Allow rules bypass resolution, on every platform.** When an argv `allow` rule matches by basename, `check_exec` skips `check_run`. So `/any/dir/git status` passes a `git status` allow rule. Confirmed on macOS. Windows extension stripping widens the match a little, so `git.cmd` matches too.
+- Items 3 to 7 above.

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::Policy;
 use crate::effect::{Decision, Reason};
-use crate::paths::resolve_lexical;
+use crate::paths::{has_path_sep, is_absolute_str, resolve_lexical};
 
 /// Port of TS `candidateCwds`: the base cwd plus each statically known cwd a relative path command may run in.
 /// `None` descriptors and `""` fall back to the base cwd. Bare names and absolute paths ignore descriptors.
@@ -19,7 +19,7 @@ pub fn candidate_cwds(
     let Some(descriptors) = descriptors else {
         return cwds;
     };
-    if command.starts_with('/') || !command.contains('/') {
+    if is_absolute_str(command) || !has_path_sep(command) {
         return cwds;
     }
     let base = base_cwd.to_string_lossy();

@@ -129,6 +129,17 @@ pub trait ProcessLauncher: Clone + Default + Send + Sync + 'static {
         let _ = (path, write);
         Ok(())
     }
+
+    /// Maps a path the host OS would misread, such as a Git Bash `/c/x` on Windows, before the
+    /// shell makes it absolute. SPIKE: proposed hook; by default no path is mapped.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path as the script spelled it.
+    fn host_path(&self, path: &std::path::Path) -> Option<std::path::PathBuf> {
+        let _ = path;
+        None
+    }
 }
 
 /// Default process launcher implementation: launches native processes, where

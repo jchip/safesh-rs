@@ -34,6 +34,8 @@ impl BaseEnvVar for HostSys {
         match key.to_str() {
             Some("PATH") => self.path.clone(),
             Some("HOME") => Some(self.home.clone().into_os_string()),
+            // Windows `which` needs it to find `ls.exe` for `ls`.
+            Some("PATHEXT") if cfg!(windows) => Some(crate::winpath::pathext().into()),
             _ => None,
         }
     }

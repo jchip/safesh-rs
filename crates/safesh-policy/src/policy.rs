@@ -22,8 +22,9 @@ use crate::config::Config;
 use crate::effect::{Access, Decision, Reason, Request};
 use crate::host::HostEnv;
 use crate::paths::{
-    compute_home_dot_dir_defaults, compute_path_dir_defaults, compute_temp_dir_defaults,
-    expand_path, is_path_within, is_path_within_any, resolve_lexical, resolve_path,
+    clean_canonical, command_name, compute_home_dot_dir_defaults, compute_path_dir_defaults,
+    compute_temp_dir_defaults, expand_path, has_path_sep, is_absolute_str, is_path_within,
+    is_path_within_any, resolve_lexical, resolve_path, same_path,
 };
 use crate::project::normalize_workspace_roots;
 use sys::HostSys;
@@ -213,7 +214,7 @@ impl Policy {
             run: eff
                 .run
                 .iter()
-                .filter(|r| r.contains('/'))
+                .filter(|r| has_path_sep(r))
                 .cloned()
                 .collect(),
         };
@@ -306,7 +307,11 @@ impl Policy {
         if self.run_set.contains(command) {
             return allow(command);
         }
-        if !command.contains('/') {
+        if !has_path_sep(command) {
+            // Windows: `ls.exe` is the name `ls`. The runtime check still resolves it through PATH.
+            if cfg!(windows) && self.run_set.contains(command_name(command)) {
+                return allow(command);
+            }
             return ask(command);
         }
 
@@ -319,7 +324,9 @@ impl Policy {
             return allow(&abs);
         }
 
-        if command.starts_with('/') {
+        if is_absolute_str(command) {
+            // Unix keeps the spelling as written. Windows needs the mapped path (`/c/x` is `C:\x`).
+            let command = if cfg!(windows) { abs.as_str() } else { command };
             if self.allow_project_commands && self.within_roots(command, cwd) {
                 return if is_executable_file(Path::new(command)) {
                     allow(command)
@@ -353,10 +360,8 @@ impl Policy {
 
     /// D2: `abs` is allowed when its basename is an allowed name and PATH resolves that name to `abs`.
     fn is_resolved_allowed_name(&self, abs: &str, cwd: &Path) -> bool {
-        let Some(name) = Path::new(abs).file_name().and_then(|n| n.to_str()) else {
-            return false;
-        };
-        if !self.run_set.contains(name) {
+        let name = command_name(abs);
+        if name.is_empty() || !self.run_set.contains(name) {
             return false;
         }
         deno_permissions::which::which_in(
@@ -365,7 +370,7 @@ impl Policy {
             self.host.path.clone(),
             cwd.to_path_buf(),
         )
-        .is_ok_and(|found| found == Path::new(abs))
+        .is_ok_and(|found| same_path(&found, Path::new(abs)))
     }
 
     /// Scripts in this agent session's own scratchpad are trusted, as in TS. A script the same
@@ -532,7 +537,7 @@ fn with_canonical(paths: &[PathBuf]) -> Vec<String> {
     let mut out = Vec::with_capacity(paths.len() * 2);
     for p in paths {
         out.push(p.to_string_lossy().into_owned());
-        if let Ok(c) = soft_canonicalize::soft_canonicalize(p)
+        if let Ok(c) = soft_canonicalize::soft_canonicalize(p).map(clean_canonical)
             && c != *p
         {
             out.push(c.to_string_lossy().into_owned());

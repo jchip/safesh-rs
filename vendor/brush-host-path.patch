@@ -1,0 +1,53 @@
+# Applies on top of brush-check-open.patch. Adds ProcessLauncher::host_path and hands check_open
+# the absolute path that open_file will open.
+diff --git a/brush-core/src/extensions.rs b/brush-core/src/extensions.rs
+index acdbb60..ea5c933 100644
+--- a/brush-core/src/extensions.rs
++++ b/brush-core/src/extensions.rs
+@@ -129,6 +129,17 @@ pub trait ProcessLauncher: Clone + Default + Send + Sync + 'static {
+         let _ = (path, write);
+         Ok(())
+     }
++
++    /// Maps a path the host OS would misread, such as a Git Bash `/c/x` on Windows, before the
++    /// shell makes it absolute. SPIKE: proposed hook; by default no path is mapped.
++    ///
++    /// # Arguments
++    ///
++    /// * `path` - The path as the script spelled it.
++    fn host_path(&self, path: &std::path::Path) -> Option<std::path::PathBuf> {
++        let _ = path;
++        None
++    }
+ }
+ 
+ /// Default process launcher implementation: launches native processes, where
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 163b80f..ef3b56f 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -1837,7 +1837,7 @@ pub(crate) async fn setup_redirect(
+ 
+                     let opened_file = extensions::ProcessLauncher::check_open(
+                             shell.process_launcher(),
+-                            &expanded_file_path,
++                            &shell.absolute_path(&expanded_file_path),
+                             !matches!(
+                                 kind,
+                                 ast::IoFileRedirectKind::Read
+diff --git a/brush-core/src/shell/fs.rs b/brush-core/src/shell/fs.rs
+index 2ffda86..c2ba125 100644
+--- a/brush-core/src/shell/fs.rs
++++ b/brush-core/src/shell/fs.rs
+@@ -218,6 +218,11 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+     /// * `path` - The path to get the absolute form of.
+     pub fn absolute_path(&self, path: impl AsRef<Path>) -> PathBuf {
+         let path = path.as_ref();
++        if let Some(mapped) =
++            crate::extensions::ProcessLauncher::host_path(&self.process_launcher, path)
++        {
++            return mapped;
++        }
+         if path.as_os_str().is_empty() || path.is_absolute() {
+             path.to_owned()
+         } else {

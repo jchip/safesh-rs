@@ -1837,7 +1837,7 @@ pub(crate) async fn setup_redirect(
 
                     let opened_file = extensions::ProcessLauncher::check_open(
                             shell.process_launcher(),
-                            &expanded_file_path,
+                            &shell.absolute_path(&expanded_file_path),
                             !matches!(
                                 kind,
                                 ast::IoFileRedirectKind::Read

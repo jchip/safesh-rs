@@ -4,11 +4,75 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use crate::host::HostEnv;
+use crate::winpath;
+
+/// The command name in `prog`, for matching against names: the last path part. On Windows a
+/// `PATHEXT` extension is dropped too, so `C:\Git\usr\bin\ls.exe` is `ls`.
+#[must_use]
+pub fn command_name(prog: &str) -> &str {
+    if cfg!(windows) {
+        winpath::command_name(prog, winpath::pathext())
+    } else {
+        prog.rsplit('/').next().unwrap_or(prog)
+    }
+}
+
+/// Whether `s` is a path rather than a bare command name.
+#[must_use]
+pub fn has_path_sep(s: &str) -> bool {
+    s.contains('/') || (cfg!(windows) && s.contains('\\'))
+}
+
+/// Whether `s` is an absolute path on this host. On Windows a Git Bash rooted path such as `/c/x`
+/// counts, since [`resolve_lexical`] maps it.
+#[must_use]
+pub fn is_absolute_str(s: &str) -> bool {
+    s.starts_with('/') || (cfg!(windows) && winpath::is_absolute(s))
+}
+
+/// The host path for a rooted spelling the OS would misread: Git Bash `/c/x` or `/tmp` on Windows.
+/// `None` on other hosts and for every other path. The engine maps paths through this, so it opens
+/// the same file the policy checked.
+#[must_use]
+pub fn host_path(path: &Path) -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let s = path.to_str()?;
+    // Devices keep their spelling: policy matches `/dev/null` by name, and the engine opens `NUL`.
+    if s == "/dev" || s.starts_with("/dev/") {
+        return Some(path.to_path_buf());
+    }
+    winpath::msys_to_windows(s, winpath::mounts()).map(PathBuf::from)
+}
+
+/// Whether two absolute paths name the same file as this host compares names.
+#[must_use]
+pub fn same_path(a: &Path, b: &Path) -> bool {
+    if cfg!(windows) {
+        winpath::same_path(&a.to_string_lossy(), &b.to_string_lossy())
+    } else {
+        a == b
+    }
+}
+
+/// A canonical path in the spelling policy compares: Windows' `\\?\` prefix is dropped.
+#[must_use]
+pub fn clean_canonical(p: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(winpath::normalize(&p.to_string_lossy()))
+    } else {
+        p
+    }
+}
 
 /// Lexically normalize a POSIX path: collapse `//` and `.`, resolve `..`.
 /// A trailing slash is kept, as `@std/path` `normalize` does. Relative paths stay relative.
 #[must_use]
 pub fn normalize_lexical(path: &str) -> String {
+    if cfg!(windows) {
+        return winpath::normalize(path);
+    }
     if path.is_empty() {
         return ".".to_string();
     }
@@ -43,6 +107,9 @@ pub fn normalize_lexical(path: &str) -> String {
 /// Like `@std/path` `resolve(cwd, path)`: absolute against `cwd`, normalized, no trailing slash.
 #[must_use]
 pub fn resolve_lexical(cwd: &str, path: &str) -> String {
+    if cfg!(windows) {
+        return winpath::resolve(cwd, path, winpath::mounts());
+    }
     let joined = if path.starts_with('/') {
         path.to_string()
     } else {
@@ -58,6 +125,9 @@ pub fn resolve_lexical(cwd: &str, path: &str) -> String {
 /// True when `path` equals `parent` or sits below it. Both should be absolute.
 #[must_use]
 pub fn is_path_within(path: &str, parent: &str) -> bool {
+    if cfg!(windows) {
+        return winpath::is_within(path, parent);
+    }
     path == parent
         || path
             .strip_prefix(parent)
@@ -94,7 +164,7 @@ pub fn is_within_project_dir(path: &str, project_dir: &str, cwd: &Path) -> bool 
 /// Like [`is_within_project_dir`], but bare command names (no slash) are never within.
 #[must_use]
 pub fn is_command_within_project_dir(command_path: &str, project_dir: &str, cwd: &Path) -> bool {
-    if !command_path.contains('/') && !command_path.contains('\\') {
+    if !has_path_sep(command_path) {
         return false;
     }
     is_within_project_dir(command_path, project_dir, cwd)
@@ -169,7 +239,7 @@ pub fn compute_temp_dir_defaults(tmpdir: Option<&str>) -> Vec<String> {
     let mut push = |dir: &str| {
         dirs.push(dir.to_string());
         if let Ok(real) = fs_err::canonicalize(dir) {
-            let real = real.to_string_lossy().into_owned();
+            let real = clean_canonical(real).to_string_lossy().into_owned();
             if real != dir {
                 dirs.push(real);
             }
@@ -193,12 +263,30 @@ pub fn compute_path_dir_defaults(path_env: Option<&OsStr>) -> Vec<String> {
     };
     let p = p.to_string_lossy();
     let mut dirs: Vec<String> = Vec::new();
-    for raw in p.split(':') {
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    for raw in p.split(sep) {
         let dir = raw.trim_end_matches(['/', '\\']);
-        if dir.is_empty() || !dir.starts_with('/') || dirs.iter().any(|d| d == dir) {
+        let dir = if cfg!(windows) {
+            winpath::normalize(dir)
+        } else {
+            dir.to_string()
+        };
+        let absolute = if cfg!(windows) {
+            winpath::is_absolute(&dir)
+        } else {
+            dir.starts_with('/')
+        };
+        let seen = dirs.iter().any(|d| {
+            if cfg!(windows) {
+                d.eq_ignore_ascii_case(&dir)
+            } else {
+                *d == dir
+            }
+        });
+        if dir.is_empty() || !absolute || seen {
             continue;
         }
-        dirs.push(dir.to_string());
+        dirs.push(dir);
     }
     dirs
 }
@@ -240,6 +328,7 @@ fn fold_private_tmp(path: PathBuf) -> PathBuf {
 #[must_use]
 pub fn resolve_path(path: &Path, cwd: &Path) -> PathBuf {
     let lexical = resolve_lexical(&cwd.to_string_lossy(), &path.to_string_lossy());
-    let real = soft_canonicalize::soft_canonicalize(&lexical).unwrap_or_else(|_| lexical.into());
+    let real = soft_canonicalize::soft_canonicalize(&lexical)
+        .map_or_else(|_| lexical.into(), clean_canonical);
     fold_private_tmp(real)
 }

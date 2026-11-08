@@ -67,11 +67,11 @@ impl Out {
 }
 
 fn base(prog: &str) -> &str {
-    prog.rsplit('/').next().unwrap_or(prog)
+    crate::paths::command_name(prog)
 }
 
 fn join(dir: &str, path: &str) -> String {
-    if path.starts_with('/') {
+    if crate::paths::is_absolute_str(path) {
         path.to_string()
     } else {
         format!("{}/{path}", dir.trim_end_matches('/'))
@@ -391,6 +391,10 @@ fn to_dest(name: &str, args: &[String], out: &mut Out) -> Option<()> {
 }
 
 fn is_remote(s: &str) -> bool {
+    // `C:\x` is a local drive path on Windows, not host `C`.
+    if cfg!(windows) && crate::winpath::is_absolute(s) {
+        return false;
+    }
     s.starts_with("rsync://") || s.find(':').is_some_and(|c| c > 0 && !s[..c].contains('/'))
 }
 
