@@ -1,7 +1,9 @@
 //! Single-use records that tie a Codex `PreToolUse` rewrite to its `PermissionRequest`.
 
+#[cfg(unix)]
 use fs_err::os::unix::fs::OpenOptionsExt;
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,10 +44,13 @@ pub enum ApprovalError {
 
 fn dir(host: &HostEnv) -> Result<PathBuf, ApprovalError> {
     let d = host.state_dir.join("approvals");
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&d)?;
+    let mut b = std::fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    b.mode(0o700);
+    b.create(&d)?;
+    // SPIKE(windows): no mode bits; the dir inherits the parent's ACL.
+    #[cfg(unix)]
     fs_err::set_permissions(&d, std::fs::Permissions::from_mode(0o700))?;
     Ok(d)
 }
@@ -112,11 +117,11 @@ pub fn write_approval(
         created_at: now_ms,
     };
     let path = d.join(format!("approval-{}.json", unique()));
-    let mut f = fs_err::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?;
+    let mut o = fs_err::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    o.mode(0o600);
+    let mut f = o.open(path)?;
     f.write_all(serde_json::to_string(&record)?.as_bytes())?;
     Ok(())
 }

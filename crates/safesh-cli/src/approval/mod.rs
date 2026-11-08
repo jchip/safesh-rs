@@ -213,10 +213,15 @@ impl Env {
     /// First executable file called `name` in `bin_dirs`.
     #[must_use]
     pub fn find_bin(&self, name: &str) -> Option<PathBuf> {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         self.bin_dirs.iter().map(|d| d.join(name)).find(|p| {
-            p.metadata()
-                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            #[cfg(unix)]
+            let exec = |m: &std::fs::Metadata| m.permissions().mode() & 0o111 != 0;
+            // SPIKE(windows): no exec bit; any file counts.
+            #[cfg(not(unix))]
+            let exec = |_: &std::fs::Metadata| true;
+            p.metadata().is_ok_and(|m| m.is_file() && exec(&m))
         })
     }
 

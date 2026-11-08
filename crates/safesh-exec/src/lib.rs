@@ -123,12 +123,15 @@ fn abort(message: &str) -> io::Error {
     let _ = writeln!(err, "{message}");
     let _ = err.flush();
     // A nested shell's denial must stop every safesh above it, not just this child.
+    // SPIKE(windows): no SIGUSR1; parents keep running. Needs TerminateProcess on Windows.
+    #[cfg(unix)]
     for pid in parent_pids() {
         let _ = rustix::process::kill_process(pid, rustix::process::Signal::USR1);
     }
     std::process::exit(i32::from(DENIED_STATUS));
 }
 
+#[cfg(unix)]
 fn parent_pids() -> Vec<rustix::process::Pid> {
     std::env::var(ENV_PARENT_PIDS)
         .unwrap_or_default()
@@ -140,6 +143,10 @@ fn parent_pids() -> Vec<rustix::process::Pid> {
 
 /// SIGUSR1 from a denied nested shell exits this process with status 126 right in the signal
 /// handler, so no later command of this script can run first.
+#[cfg(not(unix))]
+fn exit_on_child_denial() {}
+
+#[cfg(unix)]
 fn exit_on_child_denial() {
     let always = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let _ = signal_hook::flag::register_conditional_shutdown(

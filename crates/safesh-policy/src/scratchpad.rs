@@ -3,6 +3,7 @@
 //! Scratchpads live at `/private/tmp/claude-<uid>/<project>/<session-id>/scratchpad`. Scripts there are
 //! trusted for that session only. The session id and uid are explicit parameters.
 
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
@@ -48,8 +49,15 @@ pub fn is_under_session_scratchpad(path: &str, session_id: Option<&str>, uid: Op
         .is_some_and(|tail| tail.chars().next().is_some_and(|c| c != '/'))
 }
 
+#[cfg(unix)]
 fn owns_claude_dir(uid: u32) -> bool {
     fs_err::metadata(format!("/tmp/claude-{uid}")).is_ok_and(|m| m.uid() == uid)
+}
+
+// SPIKE(windows): no uid ownership check; scratchpad trust is off on Windows.
+#[cfg(not(unix))]
+fn owns_claude_dir(_uid: u32) -> bool {
+    false
 }
 
 /// Whether `path` is an existing file in this session's scratchpad. The real path must stay inside

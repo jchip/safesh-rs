@@ -3,9 +3,9 @@
 //! The hook writes `<state>/once/<pending id>.json`. `safesh run --pending <id>` claims it by
 //! rename, so a second run finds nothing. `<state>` is on the deny-write list.
 
+use safesh_policy::compat::fs::{DirBuilderExt, OpenOptionsExt};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 

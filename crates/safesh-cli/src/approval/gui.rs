@@ -122,7 +122,7 @@ fn kdialog_cmd(kdialog: &Path, prompt: &Prompt) -> Command {
     cmd
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::collections::HashMap;
 

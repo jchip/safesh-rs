@@ -33,7 +33,11 @@ impl HostEnv {
             xdg_config_home: var("XDG_CONFIG_HOME").map(PathBuf::from),
             path: var("PATH"),
             claude_project_dir: var("CLAUDE_PROJECT_DIR").map(PathBuf::from),
+            #[cfg(unix)]
             uid: rustix::process::getuid().as_raw(),
+            // SPIKE(windows): no uid; 0 never matches a real claude-<uid> dir check.
+            #[cfg(not(unix))]
+            uid: 0,
             state_dir: var("SAFESH_STATE_DIR")
                 .map_or_else(|| PathBuf::from("/tmp/safesh"), PathBuf::from),
         }

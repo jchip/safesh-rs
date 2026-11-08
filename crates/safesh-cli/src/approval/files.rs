@@ -3,10 +3,12 @@
 //! The dir is under the state dir, which is on the deny-write list, so the agent's shell
 //! can't write answers or tickets.
 
+use safesh_policy::compat::fs::{DirBuilderExt, OpenOptionsExt};
 use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -27,7 +29,9 @@ fn ensure_dir(dir: &Path) -> std::io::Result<()> {
         .recursive(true)
         .mode(0o700)
         .create(dir)?;
-    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+    #[cfg(unix)]
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+    Ok(())
 }
 
 /// This process's place in the prompt queue. Dropping it leaves the queue.
@@ -115,14 +119,7 @@ fn ticket_alive(name: &str) -> bool {
     let Some(pid) = name.split('-').nth(1).and_then(|p| p.parse::<i32>().ok()) else {
         return false;
     };
-    let Some(pid) = rustix::process::Pid::from_raw(pid) else {
-        return false;
-    };
-    // EPERM means the process exists but belongs to someone else.
-    !matches!(
-        rustix::process::test_kill_process(pid),
-        Err(rustix::io::Errno::SRCH)
-    )
+    safesh_policy::compat::pid_alive(pid)
 }
 
 #[derive(Serialize, Deserialize)]
