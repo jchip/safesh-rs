@@ -109,3 +109,59 @@ fn runtime_write_to_session_grants_is_denied() {
     assert!(!r.stdout.contains("after"), "{}", r.stdout);
     assert!(!e.proj.join(".temp/safesh/session-s1.json").exists());
 }
+
+#[test]
+fn allow_rule_does_not_cover_a_hidden_program_path() {
+    // The pre-check can't see the path, so only the runtime check stands between it and the run.
+    let e = Env::new();
+    let fake = fake_tool(&e.outside.join("bin"), "git");
+    e.write_global_config(r#"{"rules":[{"match":["git","status"],"action":"allow"}]}"#);
+    let r = e.hook_run(&format!(
+        "g=$(printf %s '{}'); \"$g\" status; echo after",
+        fake.display()
+    ));
+    assert_eq!(r.code, 126, "stdout={} stderr={}", r.stdout, r.stderr);
+    assert!(!r.stdout.contains("RAN git"), "fake ran: {}", r.stdout);
+    assert!(!r.stdout.contains("after"), "ran past denial: {}", r.stdout);
+}
+
+#[test]
+fn allow_rule_does_not_follow_a_path_the_script_changed() {
+    // The script puts the fake first on PATH. The rule's `git` is still the one the
+    // session's PATH finds.
+    let e = Env::new();
+    let bin = e.outside.join("bin");
+    fake_tool(&bin, "git");
+    e.write_global_config(r#"{"rules":[{"match":["git","status"],"action":"allow"}]}"#);
+    let script = format!("PATH='{}':\"$PATH\"; git status; echo after", bin.display());
+    let h = e.hook(&script);
+    if h.decision() == "allow" {
+        let r = e.sh(&h.command());
+        assert_eq!(r.code, 126, "stdout={} stderr={}", r.stdout, r.stderr);
+        assert!(!r.stdout.contains("RAN git"), "fake ran: {}", r.stdout);
+    }
+}
+
+#[test]
+fn allow_rule_still_runs_the_program_path_resolves() {
+    // A tool on no allow list, allowed only by the rule, resolved through PATH.
+    let td = tempfile::Builder::new()
+        .prefix("rulebin")
+        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .unwrap();
+    let bin = td.path().canonicalize().unwrap();
+    fake_tool(&bin, "safesh-rule-tool");
+    let e = Env::new().with_path_prefix(bin.clone());
+    e.write_global_config(r#"{"rules":[{"match":["safesh-rule-tool","go"],"action":"allow"}]}"#);
+    let r = e.hook_run("safesh-rule-tool go");
+    assert_eq!(r.code, 0, "stdout={} stderr={}", r.stdout, r.stderr);
+    assert!(r.stdout.contains("RAN safesh-rule-tool"), "{}", r.stdout);
+    let by_path = e.hook_run(&format!("'{}' go", bin.join("safesh-rule-tool").display()));
+    assert_eq!(
+        by_path.code, 0,
+        "stdout={} stderr={}",
+        by_path.stdout, by_path.stderr
+    );
+    let without_rule = e.hook("safesh-rule-tool stop");
+    assert_ne!(without_rule.decision(), "allow", "{}", without_rule.stdout);
+}

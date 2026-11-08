@@ -73,6 +73,8 @@ Prefix rules on the expanded argv, with three results: allow, ask, deny. Deny be
 
 Pipeline-shaped rules such as `curl | sh` are matched by the static pre-check. The runtime hook sees one process at a time.
 
+A rule's first element matches `argv[0]` by basename. An allow rule still covers only the program its name resolves to through the session's PATH (D2), or a path the rule spells out itself. `/tmp/x/git status` does not pass a `git status` allow rule, and neither does `git status` after the script puts `/tmp/x` first on PATH.
+
 ### 4.3 Path arguments for file-changing commands (new, required)
 
 A command-spec table says which argv slots are write or read paths for each known command. The runtime hook checks those paths against `permissions.write` and `denyWrite`.

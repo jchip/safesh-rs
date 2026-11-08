@@ -32,6 +32,18 @@ pub fn evaluate(rules: &[Rule], argv: &[String]) -> Option<RuleAction> {
         .max()
 }
 
+/// Like [`evaluate`], but a rule's leading element must match `argv[0]` as written. The basename
+/// rule is off, so a `git` pattern does not match `/usr/bin/git`.
+#[must_use]
+pub fn evaluate_literal(rules: &[Rule], argv: &[String]) -> Option<RuleAction> {
+    rules
+        .iter()
+        .filter(|r| !r.pattern.iter().any(|p| p == "|"))
+        .filter(|r| match_prefix(&r.pattern, argv, false))
+        .map(|r| r.action)
+        .max()
+}
+
 /// Strongest action among `|` rules whose stage patterns match consecutive pipeline stages.
 #[must_use]
 pub fn evaluate_pipeline(rules: &[Rule], stages: &[Vec<String>]) -> Option<RuleAction> {

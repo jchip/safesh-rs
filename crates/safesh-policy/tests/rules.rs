@@ -171,3 +171,25 @@ fn config_json_with_rules() {
     assert_eq!(out["match"][2], "-f");
     assert_eq!(out["action"], "deny");
 }
+
+#[test]
+fn literal_evaluation_has_no_basename_rule() {
+    use safesh_policy::rules::evaluate_literal;
+    let rules = vec![
+        r(&["git", "status"], Allow),
+        r(&["/opt/tools/deploy", "**"], Allow),
+    ];
+    assert_eq!(evaluate(&rules, &v(&["/tmp/x/git", "status"])), Some(Allow));
+    assert_eq!(
+        evaluate_literal(&rules, &v(&["/tmp/x/git", "status"])),
+        None
+    );
+    assert_eq!(
+        evaluate_literal(&rules, &v(&["git", "status"])),
+        Some(Allow)
+    );
+    assert_eq!(
+        evaluate_literal(&rules, &v(&["/opt/tools/deploy", "x"])),
+        Some(Allow)
+    );
+}

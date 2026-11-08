@@ -17,6 +17,8 @@ pub struct Env {
     pub home: PathBuf,
     pub state: PathBuf,
     pub proj: PathBuf,
+    /// Put first on `PATH` for the hook and the run. See [`Env::with_path_prefix`].
+    pub path_prefix: Option<PathBuf>,
 }
 
 pub struct Hook {
@@ -101,12 +103,28 @@ impl Env {
             home,
             state,
             proj,
+            path_prefix: None,
         }
     }
 
+    /// Puts `dir` first on `PATH` for every process this env starts.
+    #[must_use]
+    pub fn with_path_prefix(mut self, dir: PathBuf) -> Self {
+        self.path_prefix = Some(dir);
+        self
+    }
+
     fn apply(&self, c: &mut Command) {
+        let base = std::env::var_os("PATH").unwrap_or_default();
+        let path = match &self.path_prefix {
+            Some(dir) => std::env::join_paths(
+                std::iter::once(dir.clone()).chain(std::env::split_paths(&base)),
+            )
+            .expect("join PATH"),
+            None => base,
+        };
         c.env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("PATH", path)
             .env("HOME", &self.home)
             .env("TMPDIR", self.root.join("tmp"))
             .env("SAFESH_STATE_DIR", &self.state)
@@ -204,6 +222,16 @@ impl Env {
     pub fn read_proj(&self, rel: &str) -> String {
         std::fs::read_to_string(self.proj.join(rel)).unwrap_or_default()
     }
+}
+
+/// Writes an executable script at `dir/name` that prints `RAN <name>`, and returns its path.
+pub fn fake_tool(dir: &Path, name: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir).unwrap();
+    let p = dir.join(name);
+    std::fs::write(&p, format!("#!/bin/sh\necho RAN {name}\n")).unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    p
 }
 
 /// Fails if the blocked target exists.

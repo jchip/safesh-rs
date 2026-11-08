@@ -353,12 +353,19 @@ impl Policy {
 
     /// D2: `abs` is allowed when its basename is an allowed name and PATH resolves that name to `abs`.
     fn is_resolved_allowed_name(&self, abs: &str, cwd: &Path) -> bool {
+        Path::new(abs)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| self.run_set.contains(name))
+            && self.resolves_by_name(abs, cwd)
+    }
+
+    /// Whether the session's PATH resolves `abs`'s basename to `abs` itself. The script can't
+    /// change this PATH: it is the one the policy was built with.
+    pub(crate) fn resolves_by_name(&self, abs: &str, cwd: &Path) -> bool {
         let Some(name) = Path::new(abs).file_name().and_then(|n| n.to_str()) else {
             return false;
         };
-        if !self.run_set.contains(name) {
-            return false;
-        }
         deno_permissions::which::which_in(
             HostSys::new(&self.host, cwd),
             name,
