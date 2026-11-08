@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::Policy;
 use crate::effect::{Access, Decision};
+use crate::paths::{has_path_sep, resolve_lexical};
 use crate::rules::{self, RuleAction};
 use crate::spec::{self, Item};
 
@@ -50,13 +51,16 @@ impl Policy {
             match item {
                 Item::Run(name) => {
                     let is_outer = std::mem::take(&mut outer) && argv.first() == Some(&name);
-                    if is_outer && rule == Some(RuleAction::Allow) {
-                        continue;
-                    }
                     let target = match program {
                         Some(p) if is_outer => p.to_string_lossy().into_owned(),
                         _ => name,
                     };
+                    if is_outer
+                        && rule == Some(RuleAction::Allow)
+                        && self.allow_rule_covers(argv, &target, cwd)
+                    {
+                        continue;
+                    }
                     let decision = self.check_run(&target, cwd);
                     if !decision.is_allow() {
                         problems.push(Problem::Run {
@@ -87,6 +91,27 @@ impl Policy {
             problems.push(Problem::Rule { action });
         }
         problems
+    }
+
+    /// Whether an allow rule may stand in for the run check of `target`. Rules match `argv[0]` by
+    /// basename, so on its own a `git` rule would let `/any/dir/git` run. It covers only the
+    /// program the rule is about (D2):
+    /// - a bare name: the runtime check sees it again as the resolved path;
+    /// - the program the session's PATH finds for that name;
+    /// - a path an allow rule spells out itself.
+    fn allow_rule_covers(&self, argv: &[String], target: &str, cwd: &Path) -> bool {
+        if !has_path_sep(target) {
+            return true;
+        }
+        let abs = resolve_lexical(&cwd.to_string_lossy(), target);
+        if self.resolves_by_name(&abs, cwd) {
+            return true;
+        }
+        let mut literal = argv.to_vec();
+        if let Some(first) = literal.first_mut() {
+            first.clone_from(&abs);
+        }
+        rules::evaluate_literal(&self.rules, &literal) == Some(RuleAction::Allow)
     }
 
     /// Decides a pipeline seen whole by the static pre-check, for `|`-shaped rules.

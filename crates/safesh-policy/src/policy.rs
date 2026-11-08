@@ -361,7 +361,15 @@ impl Policy {
     /// D2: `abs` is allowed when its basename is an allowed name and PATH resolves that name to `abs`.
     fn is_resolved_allowed_name(&self, abs: &str, cwd: &Path) -> bool {
         let name = command_name(abs);
-        if name.is_empty() || !self.run_set.contains(name) {
+        !name.is_empty() && self.run_set.contains(name) && self.resolves_by_name(abs, cwd)
+    }
+
+    /// Whether the session's PATH resolves `abs`'s command name to `abs` itself. The script can't
+    /// change this PATH: it is the one the policy was built with. On Windows the name drops its
+    /// `PATHEXT` extension, so `ls.exe` is looked up as `ls`.
+    pub(crate) fn resolves_by_name(&self, abs: &str, cwd: &Path) -> bool {
+        let name = command_name(abs);
+        if name.is_empty() {
             return false;
         }
         deno_permissions::which::which_in(

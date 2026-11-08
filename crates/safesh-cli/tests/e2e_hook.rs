@@ -283,3 +283,30 @@ fn agent_cannot_write_its_own_grants() {
     let h = e.hook("echo '{}' > .temp/safesh/session-s1.json");
     assert_eq!(h.decision(), "deny", "{}", h.stdout);
 }
+
+#[test]
+fn allow_rule_does_not_cover_another_program_with_that_name() {
+    // D2: an allow rule for `git status` is about the `git` that PATH finds, not any file named git.
+    let e = Env::new();
+    let fake = fake_tool(&e.outside.join("bin"), "git");
+    e.write_global_config(r#"{"rules":[{"match":["git","status"],"action":"allow"}]}"#);
+    let h = e.hook(&format!("'{}' status", fake.display()));
+    assert_ne!(h.decision(), "allow", "{}", h.stdout);
+    assert!(h.reason().contains("BLOCKED"), "{}", h.reason());
+    let ok = e.hook("git status");
+    assert_eq!(ok.decision(), "allow", "{}", ok.stdout);
+}
+
+#[test]
+fn allow_rule_that_names_the_path_covers_it() {
+    let e = Env::new();
+    let fake = fake_tool(&e.outside.join("bin"), "deploy");
+    e.write_global_config(&format!(
+        r#"{{"rules":[{{"match":["{}","--dry-run"],"action":"allow"}}]}}"#,
+        fake.display()
+    ));
+    let h = e.hook(&format!("'{}' --dry-run", fake.display()));
+    assert_eq!(h.decision(), "allow", "{}", h.stdout);
+    let other = e.hook(&format!("'{}' --for-real", fake.display()));
+    assert_ne!(other.decision(), "allow", "{}", other.stdout);
+}
