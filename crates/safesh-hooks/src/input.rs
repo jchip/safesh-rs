@@ -103,6 +103,12 @@ pub fn parse_input(_agent: Agent, stdin: &str) -> Result<Option<HookInput>, Hook
     ])
     .and_then(Value::as_str)
     .filter(|s| !s.is_empty())
+    .or_else(|| {
+        root.get("workspacePaths")
+            .or_else(|| root.get("workspace_paths"))
+            .and_then(Value::as_array)
+            .and_then(|a| a.iter().find_map(|v| v.as_str().filter(|s| !s.is_empty())))
+    })
     .map(PathBuf::from);
 
     let session_id = first_str(

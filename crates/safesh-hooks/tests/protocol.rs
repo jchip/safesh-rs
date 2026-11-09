@@ -36,6 +36,24 @@ fn agy_wait_ms_becomes_seconds() {
 }
 
 #[test]
+fn agy_workspace_paths_fallback_for_cwd() {
+    let i = p(
+        r#"{"workspacePaths":["/ws/one","/ws/two"],"toolCall":{"name":"run_command","args":{"CommandLine":"ls"}}}"#,
+    )
+    .unwrap();
+    assert_eq!(i.cwd.as_deref(), Some(std::path::Path::new("/ws/one")));
+
+    let explicit = p(
+        r#"{"workspacePaths":["/ws/one"],"toolCall":{"name":"run_command","args":{"CommandLine":"ls","Cwd":"/explicit"}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        explicit.cwd.as_deref(),
+        Some(std::path::Path::new("/explicit"))
+    );
+}
+
+#[test]
 fn tool_name_is_case_insensitive_and_command_required() {
     assert!(p(r#"{"tool_name":"BASH","tool_input":{"command":"ls"}}"#).is_some());
     assert!(p(r#"{"tool_name":"Bash","tool_input":{}}"#).is_none());
