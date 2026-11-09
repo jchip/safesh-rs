@@ -32,12 +32,35 @@ pub(crate) const DEVICE_PATHS: [&str; 5] = [
 
 pub(crate) fn is_device(path: &str) -> bool {
     // Not `Path::is_absolute`: on Windows `/dev/null` has no drive, so it isn't absolute there.
-    // Windows `normalize` joins with `\`, so compare in `/` spelling.
-    path.starts_with('/')
-        && DEVICE_PATHS.contains(
-            &normalize(Path::new(path))
-                .to_string_lossy()
-                .replace('\\', "/")
-                .as_str(),
-        )
+    if !path.starts_with('/') {
+        return false;
+    }
+    let norm = normalize(Path::new(path)).to_string_lossy().into_owned();
+    // Windows `normalize` joins with `\`, so compare in `/` spelling there. On Unix `\` is an
+    // ordinary file-name char: `/dev\null` is a file in `/`, not a device.
+    let norm = if cfg!(windows) {
+        norm.replace('\\', "/")
+    } else {
+        norm
+    };
+    DEVICE_PATHS.contains(&norm.as_str())
+}
+
+#[cfg(test)]
+mod device_tests {
+    use super::is_device;
+
+    #[test]
+    fn devices_by_name() {
+        assert!(is_device("/dev/null"));
+        assert!(is_device("/dev/./null"));
+        assert!(!is_device("/dev/sda"));
+        assert!(!is_device("dev/null"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn backslash_is_a_name_char_on_unix() {
+        assert!(!is_device("/dev\\null"));
+    }
 }

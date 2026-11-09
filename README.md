@@ -22,6 +22,18 @@ The binary is `target/release/safesh`. Put it on your `PATH`; the retry hints it
 
 safesh only sees what its own shell runs. A Python script deleting files, or `make` running its own `/bin/sh`, is outside its reach.
 
+## Platforms
+
+- **macOS and Linux:** the main targets. CI builds and tests macOS arm64, Linux x86_64 and Linux arm64.
+- **Windows: experimental.** Native Windows under Git Bash, the shell Claude Code's Bash tool uses there. CI builds and tests it on `windows-latest`. Git Bash paths (`/c/x`, `/tmp`, `~`) are mapped the way `cygpath` maps them, nested shells are gated, the state dirs are owner-only, scratchpad scripts are trusted, and approvals use a desktop dialog. Known gaps:
+  - Arguments to native Windows programs are not converted. Git Bash turns `/c/x` into `C:\x` for programs like `git.exe`; safesh does not, so policy checks `C:\x` while the program reads `C:\c\x`. Use Windows paths (`C:/x`) in arguments to native programs.
+  - `#!` scripts do not start, because Windows has no shebang support. Run them as `bash script.sh`.
+  - A command run by its Git Bash path (`/usr/bin/ls`, `/tmp/x/tool.exe`) is not mapped at runtime and is blocked.
+  - Stale approval-queue tickets are not cleaned up.
+  - Not yet tried in a real Claude Code session on Windows.
+
+  Details: `notes/windows-spike-results.md`.
+
 ## Install
 
 ```sh
