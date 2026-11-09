@@ -82,8 +82,8 @@ impl Run {
 
 impl Env {
     pub fn new() -> Self {
-        let td = tempfile::tempdir().expect("tempdir");
-        let root = td.path().canonicalize().expect("canonicalize");
+        let td = tempfile::tempdir_in(test_tmp_root()).expect("tempdir");
+        let root = canon(td.path());
         let home = root.join("home");
         let state = root.join("state");
         let proj = root.join("proj");
@@ -94,7 +94,7 @@ impl Env {
             .prefix("outside")
             .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
             .expect("outside tempdir");
-        let outside = out_td.path().canonicalize().expect("canonicalize");
+        let outside = canon(out_td.path());
         Self {
             _td: td,
             _outside: out_td,
@@ -115,7 +115,16 @@ impl Env {
     }
 
     fn apply(&self, c: &mut Command) {
-        let base = std::env::var_os("PATH").unwrap_or_default();
+        let mut base = std::env::var_os("PATH").unwrap_or_default();
+        // Windows: Git Bash puts its coreutils on PATH, and the agent's shell is Git Bash.
+        if cfg!(windows)
+            && let Some(git) = &safesh_policy::winpath::mounts().root
+        {
+            let usr_bin = PathBuf::from(git).join("usr").join("bin");
+            base =
+                std::env::join_paths(std::iter::once(usr_bin).chain(std::env::split_paths(&base)))
+                    .expect("join PATH");
+        }
         let path = match &self.path_prefix {
             Some(dir) => std::env::join_paths(
                 std::iter::once(dir.clone()).chain(std::env::split_paths(&base)),
@@ -131,6 +140,17 @@ impl Env {
             // Never open a real popup or dialog. Approval tests remove this and use fakes.
             .env("SAFESH_APPROVAL", "off")
             .current_dir(&self.proj);
+        // Windows processes need these, and safesh reads `TEMP` and `PATHEXT`.
+        if cfg!(windows) {
+            for k in ["SystemRoot", "windir", "PATHEXT", "COMSPEC"] {
+                if let Some(v) = std::env::var_os(k) {
+                    c.env(k, v);
+                }
+            }
+            c.env("TEMP", self.root.join("tmp"))
+                .env("TMP", self.root.join("tmp"))
+                .env("USERPROFILE", &self.home);
+        }
     }
 
     pub fn safesh(&self, args: &[&str]) -> Command {
@@ -146,7 +166,7 @@ impl Env {
 
     /// Runs a shell string, such as a hook rewrite, with `/bin/sh -c` in the project.
     pub fn sh(&self, script: &str) -> Run {
-        let mut c = Command::new("/bin/sh");
+        let mut c = Command::new(sh_path());
         self.apply(&mut c);
         c.arg("-c").arg(script);
         Run::of(&c.output().expect("spawn sh"))
@@ -226,15 +246,77 @@ impl Env {
 
 /// Writes an executable script at `dir/name` that prints `RAN <name>`, and returns its path.
 pub fn fake_tool(dir: &Path, name: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(dir).unwrap();
     let p = dir.join(name);
     std::fs::write(&p, format!("#!/bin/sh\necho RAN {name}\n")).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     p
 }
 
 /// Fails if the blocked target exists.
+/// Where `Env` roots go. Windows: `%SystemDrive%\\safesh-test-tmp`. The user temp dir is under the
+/// profile, and the project search walks past `proj\\.git` to the profile's `.claude`, so every
+/// test would share the real profile as its project and write grants there.
+pub fn test_tmp_root() -> PathBuf {
+    if cfg!(windows) {
+        let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        let root = PathBuf::from(format!("{drive}\\safesh-test-tmp"));
+        std::fs::create_dir_all(&root).unwrap();
+        return root;
+    }
+    std::env::temp_dir()
+}
+
+/// `/bin/sh`, or Git Bash on Windows, found the way safesh finds the Git install.
+pub fn sh_path() -> PathBuf {
+    if cfg!(windows) {
+        let root = safesh_policy::winpath::mounts()
+            .root
+            .clone()
+            .expect("Git for Windows not found");
+        return PathBuf::from(root).join("bin").join("bash.exe");
+    }
+    PathBuf::from("/bin/sh")
+}
+
+/// Real path without the `\\?\` prefix Windows adds, as safesh spells paths.
+pub fn canon(p: &Path) -> PathBuf {
+    let real = p.canonicalize().expect("canonicalize");
+    let s = real.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => real,
+    }
+}
+
+/// A file the default policy must never let a script write: its spelling in a script, and its
+/// path on disk. `/etc/<name>` on Unix, `C:\Windows\<name>` (`/c/Windows/<name>`) on Windows.
+pub fn denied_target(name: &str) -> (String, PathBuf) {
+    if cfg!(windows) {
+        (
+            format!("/c/Windows/{name}"),
+            PathBuf::from(format!(r"C:\Windows\{name}")),
+        )
+    } else {
+        let p = format!("/etc/{name}");
+        (p.clone(), PathBuf::from(p))
+    }
+}
+
+/// `p` as an unquoted word in a script. Windows: `/` separators, since bash reads `\` as an escape.
+pub fn sh_word(p: &Path) -> String {
+    let s = p.display().to_string();
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s
+    }
+}
+
 pub fn assert_absent(p: impl AsRef<Path>) {
     let p = p.as_ref();
     assert!(

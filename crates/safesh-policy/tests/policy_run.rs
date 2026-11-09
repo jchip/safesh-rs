@@ -78,6 +78,12 @@ fn cmd_4_name_not_allowed() {
 fn path_host(f: &Fx, name: &str) -> (PathBuf, PathBuf, safesh_policy::host::HostEnv) {
     let bin = f.root.join("bin");
     let other = f.root.join("other");
+    // Windows finds a program on PATH only with a `PATHEXT` extension.
+    let name = &if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    };
     exe(&bin.join(name));
     exe(&other.join(name));
     let mut host = f.host.clone();

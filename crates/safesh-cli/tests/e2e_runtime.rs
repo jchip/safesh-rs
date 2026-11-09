@@ -3,7 +3,7 @@ use common::*;
 
 /// Hook must allow (the name is only known at runtime), then the rewrite must stop with 126
 /// before `after`, and nothing may be created at `target`.
-fn runtime_denied(script: &str, target: &str, not_printed: &str) -> Run {
+fn runtime_denied(script: &str, target: &std::path::Path, not_printed: &str) -> Run {
     let e = Env::new();
     let r = e.hook_run(script);
     assert_eq!(r.code, 126, "stdout={} stderr={}", r.stdout, r.stderr);
@@ -19,16 +19,20 @@ fn runtime_denied(script: &str, target: &str, not_printed: &str) -> Run {
 
 #[test]
 fn runtime_variable_command_name_denied() {
-    let t = "/etc/safesh-e2e-var";
-    runtime_denied(&format!("x=$(echo touch); $x {t}; echo after"), t, "after");
+    let (t, th) = denied_target("safesh-e2e-var");
+    runtime_denied(
+        &format!("x=$(echo touch); $x {t}; echo after"),
+        &th,
+        "after",
+    );
 }
 
 #[test]
 fn runtime_denial_in_pipeline_stops_run() {
-    let t = "/etc/safesh-e2e-pipe";
+    let (t, th) = denied_target("safesh-e2e-pipe");
     let r = runtime_denied(
         &format!("x=$(echo touch); echo before; $x {t} | cat; echo after"),
-        t,
+        &th,
         "after",
     );
     assert!(r.stdout.contains("before"), "{}", r.stdout);
@@ -36,51 +40,51 @@ fn runtime_denial_in_pipeline_stops_run() {
 
 #[test]
 fn runtime_denial_in_for_loop() {
-    let t = "/etc/safesh-e2e-for";
+    let (t, th) = denied_target("safesh-e2e-for");
     runtime_denied(
         &format!("x=$(echo touch); for i in 1 2; do $x {t}$i; echo after; done"),
-        t,
+        &th,
         "after",
     );
-    assert_absent(format!("{t}1"));
-    assert_absent(format!("{t}2"));
+    assert_absent(format!("{}1", th.display()));
+    assert_absent(format!("{}2", th.display()));
 }
 
 #[test]
 fn runtime_denial_in_function() {
-    let t = "/etc/safesh-e2e-fn";
+    let (t, th) = denied_target("safesh-e2e-fn");
     runtime_denied(
         &format!("x=$(echo touch); f() {{ $x {t}; echo inside; }}; f; echo after"),
-        t,
+        &th,
         "inside",
     );
 }
 
 #[test]
 fn runtime_denial_in_eval() {
-    let t = "/etc/safesh-e2e-eval";
+    let (t, th) = denied_target("safesh-e2e-eval");
     runtime_denied(
         &format!("x=$(echo touch); eval \"$x {t}\"; echo after"),
-        t,
+        &th,
         "after",
     );
 }
 
 #[test]
 fn nested_bash_c_denied_stops_parent() {
-    let t = "/etc/safesh-e2e-bashc";
+    let (t, th) = denied_target("safesh-e2e-bashc");
     let e = Env::new();
     let h = e.hook(&format!("bash -c 'touch {t}'; echo after"));
     assert_eq!(h.decision(), "allow", "{}", h.stdout);
     let r = e.sh(&h.command());
     assert_eq!(r.code, 126, "stdout={} stderr={}", r.stdout, r.stderr);
     assert!(!r.stdout.contains("after"), "{}", r.stdout);
-    assert_absent(t);
+    assert_absent(&th);
 }
 
 #[test]
 fn sh_script_denied_stops_parent() {
-    let t = "/etc/safesh-e2e-shscript";
+    let (t, th) = denied_target("safesh-e2e-shscript");
     let e = Env::new();
     e.write("s.sh", &format!("touch {t}\n"));
     let h = e.hook("sh s.sh; echo after");
@@ -88,7 +92,7 @@ fn sh_script_denied_stops_parent() {
     let r = e.sh(&h.command());
     assert_eq!(r.code, 126, "stdout={} stderr={}", r.stdout, r.stderr);
     assert!(!r.stdout.contains("after"), "{}", r.stdout);
-    assert_absent(t);
+    assert_absent(&th);
 }
 
 #[test]
@@ -111,6 +115,10 @@ fn runtime_write_to_session_grants_is_denied() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "the fake tool is a #! script, which does not start on Windows"
+)]
 fn allow_rule_does_not_cover_a_hidden_program_path() {
     // The pre-check can't see the path, so only the runtime check stands between it and the run.
     let e = Env::new();
@@ -143,6 +151,10 @@ fn allow_rule_does_not_follow_a_path_the_script_changed() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "the fake tool is a #! script, which does not start on Windows"
+)]
 fn allow_rule_still_runs_the_program_path_resolves() {
     // A tool on no allow list, allowed only by the rule, resolved through PATH.
     let td = tempfile::Builder::new()

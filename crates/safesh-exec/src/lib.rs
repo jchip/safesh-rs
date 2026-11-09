@@ -142,7 +142,10 @@ fn parent_pids() -> Vec<u32> {
 #[cfg(unix)]
 fn stop_parents() {
     for pid in parent_pids() {
-        let Some(pid) = i32::try_from(pid).ok().and_then(rustix::process::Pid::from_raw) else {
+        let Some(pid) = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        else {
             continue;
         };
         let _ = rustix::process::kill_process(pid, rustix::process::Signal::USR1);

@@ -48,6 +48,10 @@ fn perm_6_tmpdir_snapshot_is_host_env() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn perm_9_path_dirs_in_default_read() {
     let f = fx();
     let mut host = f.host.clone();
@@ -74,6 +78,10 @@ fn perm_10_path_dirs_can_be_excluded() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn tp_5_workspace_dir_in_read_and_write() {
     let f = fx();
     let c = Config {
@@ -86,6 +94,10 @@ fn tp_5_workspace_dir_in_read_and_write() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pd_30_block_write_denies_root() {
     let f = fx();
     let e = effective_permissions(&proj_cfg(Some(true)), Path::new("/tmp"), &f.host);
@@ -95,6 +107,10 @@ fn pd_30_block_write_denies_root() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pd_31_block_write_false() {
     let f = fx();
     let e = effective_permissions(&proj_cfg(Some(false)), Path::new("/tmp"), &f.host);
@@ -104,6 +120,10 @@ fn pd_31_block_write_false() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pd_32_block_write_unset() {
     let f = fx();
     let e = effective_permissions(&proj_cfg(None), Path::new("/tmp"), &f.host);
@@ -142,6 +162,10 @@ fn pd_35_explicit_write_under_root_keeps_root_out_of_deny() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pd_36_explicit_write_elsewhere_still_denies_root() {
     let f = fx();
     let mut c = proj_cfg(Some(true));

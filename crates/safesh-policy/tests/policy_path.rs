@@ -74,6 +74,7 @@ fn pu_18_empty_config_not_allowed() {
 }
 
 #[test]
+#[cfg(unix)] // symlinks need admin or Developer Mode on Windows
 fn tp_12_symlink_to_outside_not_allowed() {
     let f = fx();
     let allowed = f.root.join("allowed");
@@ -91,6 +92,7 @@ fn tp_12_symlink_to_outside_not_allowed() {
 }
 
 #[test]
+#[cfg(unix)] // symlinks need admin or Developer Mode on Windows
 fn tp_13_symlink_resolves_to_target() {
     let f = fx();
     let dir = f.root.join("dir");

@@ -301,10 +301,10 @@ fn allow_rule_does_not_cover_another_program_with_that_name() {
 fn allow_rule_that_names_the_path_covers_it() {
     let e = Env::new();
     let fake = fake_tool(&e.outside.join("bin"), "deploy");
-    e.write_global_config(&format!(
-        r#"{{"rules":[{{"match":["{}","--dry-run"],"action":"allow"}}]}}"#,
-        fake.display()
-    ));
+    e.write_global_config(
+        &serde_json::json!({"rules": [{"match": [fake, "--dry-run"], "action": "allow"}]})
+            .to_string(),
+    );
     let h = e.hook(&format!("'{}' --dry-run", fake.display()));
     assert_eq!(h.decision(), "allow", "{}", h.stdout);
     let other = e.hook(&format!("'{}' --for-real", fake.display()));

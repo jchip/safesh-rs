@@ -247,6 +247,10 @@ fn ph_30_plain_command() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn ph_35_final_cwd() {
     assert_eq!(
         fin(&run("cd sub && echo ===")).as_deref(),
@@ -255,6 +259,10 @@ fn ph_35_final_cwd() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn ph_36_var_through_chain() {
     let a = run("S=/base/s; mkdir -p $S/pm && cd $S/pm && echo x > f.txt; ls *.txt");
     assert_eq!(fin(&a).as_deref(), Some("/base/s/pm"));
@@ -263,6 +271,10 @@ fn ph_36_var_through_chain() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn ph_37_exit_chain() {
     assert_eq!(
         fin(&run("cd sub && echo === && exit 7")).as_deref(),
@@ -271,6 +283,10 @@ fn ph_37_exit_chain() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn ph_38_back_to_base() {
     assert_eq!(
         fin(&run("cd sub && cd .. && echo ===")).as_deref(),
@@ -279,6 +295,10 @@ fn ph_38_back_to_base() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn ph_39_no_cd() {
     let a = run("echo ===");
     assert_eq!(fin(&a).as_deref(), Some("/base"));
@@ -296,6 +316,10 @@ fn ph_41_function_changes_cwd() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn ph_45_exit_only() {
     assert_eq!(fin(&run("echo === && exit 7")).as_deref(), Some("/base"));
 }

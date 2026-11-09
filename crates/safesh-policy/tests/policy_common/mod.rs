@@ -27,17 +27,39 @@ pub fn fx() -> Fx {
 
 /// Like [`fx`] but under the OS temp dir, away from any `.claude` dir above the repo.
 /// Needed by project root detection tests.
+/// Where test temp dirs go. Windows: `%SystemDrive%\\safesh-test-tmp`, because the user temp dir
+/// sits under the profile, whose `.claude` would count as a project marker above every fixture.
+pub fn test_tmp_root() -> PathBuf {
+    if cfg!(windows) {
+        let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        let root = PathBuf::from(format!("{drive}\\safesh-test-tmp"));
+        std::fs::create_dir_all(&root).unwrap();
+        return root;
+    }
+    std::env::temp_dir()
+}
+
 pub fn fx_outside_repo() -> Fx {
     make_fx(
         tempfile::Builder::new()
             .prefix("policy-")
-            .tempdir()
+            .tempdir_in(test_tmp_root())
             .unwrap(),
     )
 }
 
+/// Real path without the `\\?\` prefix Windows adds, as safesh spells paths.
+pub fn canon(p: &Path) -> PathBuf {
+    let real = std::fs::canonicalize(p).unwrap();
+    let s = real.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => real,
+    }
+}
+
 fn make_fx(t: TempDir) -> Fx {
-    let root = fs_err::canonicalize(t.path()).unwrap();
+    let root = canon(t.path());
     fs_err::create_dir_all(root.join("emptybin")).unwrap();
     let host = HostEnv {
         home: root.join("home"),
@@ -57,10 +79,14 @@ pub fn write(path: &Path, text: &str) {
 }
 
 /// Creates an executable file.
+/// Windows has no exec bit: any file counts.
 pub fn exe(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
     write(path, "#!/bin/sh\n");
-    fs_err::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs_err::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
 }
 
 pub fn s(items: &[&str]) -> Vec<String> {

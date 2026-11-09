@@ -75,3 +75,41 @@ jobs:
           name: safesh-${{ matrix.name }}
           path: safesh-${{ matrix.name }}.tar.gz
           if-no-files-found: error
+
+  # Native Windows under Git Bash, the shell Claude Code's Bash tool uses there. Its own job: the
+  # Unix matrix steps use uname and tar, and Windows-only code needs its own clippy pass.
+  windows:
+    name: build (windows-x86_64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      # Same pin as the lint job, so clippy results match.
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-x86_64
+      - name: Toolchain and Git Bash versions
+        run: |
+          rustc --version
+          bash --version | head -1
+          git --version
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Tests that only make sense on Unix are marked ignored on Windows, each with its reason.
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --locked -p safesh-cli
+      - name: Smoke test the binary
+        run: |
+          ./target/release/safesh.exe --version
+          ./target/release/safesh.exe check 'ls | wc -l' | tail -1 | grep -q 'decision: allow'
+      - name: Package
+        run: 7z a safesh-windows-x86_64.zip ./target/release/safesh.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safesh-windows-x86_64
+          path: safesh-windows-x86_64.zip
+          if-no-files-found: error

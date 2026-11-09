@@ -1,5 +1,9 @@
 //! End to end tests for `safesh approve-ask` with fake channel binaries.
 //! Channel binaries come only from `--bin-dir`, so no real popup or dialog ever opens.
+//!
+//! Unix only: the fakes are `#!/bin/sh` scripts, and tmux is a Unix channel. The Windows dialog
+//! has unit tests in `approval::gui`.
+#![cfg(unix)]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

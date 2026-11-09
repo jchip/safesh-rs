@@ -175,8 +175,13 @@ mod win {
                 return Err(io::Error::last_os_error());
             }
             let mut buf = vec![0u64; (len as usize).div_ceil(8)];
-            if GetTokenInformation(token.0, TokenUser, buf.as_mut_ptr().cast(), len, &raw mut len)
-                == 0
+            if GetTokenInformation(
+                token.0,
+                TokenUser,
+                buf.as_mut_ptr().cast(),
+                len,
+                &raw mut len,
+            ) == 0
             {
                 return Err(io::Error::last_os_error());
             }
@@ -282,7 +287,10 @@ mod win {
     mod tests {
         /// `icacls` output for `path`, one ACE per line, the path prefix stripped.
         fn aces(path: &std::path::Path) -> Vec<String> {
-            let out = std::process::Command::new("icacls").arg(path).output().unwrap();
+            let out = std::process::Command::new("icacls")
+                .arg(path)
+                .output()
+                .unwrap();
             let text = String::from_utf8_lossy(&out.stdout).replace(&*path.to_string_lossy(), "");
             text.lines()
                 .map(str::trim)
@@ -300,7 +308,9 @@ mod win {
             let f = t.path().join("file");
             std::fs::write(&f, "").unwrap();
             assert!(!super::super::dir_owned_by_user_or_admins(&f));
-            assert!(!super::super::dir_owned_by_user_or_admins(&t.path().join("missing")));
+            assert!(!super::super::dir_owned_by_user_or_admins(
+                &t.path().join("missing")
+            ));
             // A junction needs no privilege, unlike a symlink.
             let j = t.path().join("junction");
             let ok = std::process::Command::new("cmd")

@@ -77,7 +77,7 @@ fn ses_4_path_with_project() {
     let f = fx();
     let p = session_file_path(&f.env, Some(&f.proj), SID).unwrap();
     assert!(p.starts_with(&f.proj));
-    assert!(p.to_string_lossy().contains("/.temp/safesh/"));
+    assert!(p.parent().unwrap().ends_with(".temp/safesh"));
     assert!(p.ends_with("session-test-session.json"));
 }
 

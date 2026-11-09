@@ -193,3 +193,37 @@ fn literal_evaluation_has_no_basename_rule() {
         Some(Allow)
     );
 }
+
+#[test]
+#[cfg(windows)]
+fn windows_path_patterns_match_any_spelling() {
+    use safesh_policy::rules::evaluate_literal;
+    let rules = [
+        r(&[r"C:\Tools\deploy.exe", "--dry-run"], Allow),
+        r(&[r"C:\Scripts\*", "**"], Ask),
+    ];
+    for p in [
+        r"C:\Tools\deploy.exe",
+        r"c:\tools\DEPLOY.EXE",
+        "C:/Tools/deploy.exe",
+    ] {
+        assert_eq!(
+            evaluate_literal(&rules, &v(&[p, "--dry-run"])),
+            Some(Allow),
+            "{p}"
+        );
+        assert_eq!(evaluate(&rules, &v(&[p, "--dry-run"])), Some(Allow), "{p}");
+    }
+    assert_eq!(
+        evaluate_literal(&rules, &v(&[r"C:\Tools\deploy.exe", "--real"])),
+        None
+    );
+    assert_eq!(
+        evaluate_literal(&rules, &v(&[r"C:\Other\deploy.exe", "--dry-run"])),
+        None
+    );
+    assert_eq!(
+        evaluate_literal(&rules, &v(&[r"C:\Scripts\x.cmd", "a"])),
+        Some(Ask)
+    );
+}

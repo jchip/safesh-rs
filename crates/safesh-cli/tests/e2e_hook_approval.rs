@@ -1,5 +1,8 @@
 //! End to end tests for the hook asking the user through a fake tmux popup.
 //! Channel binaries come only from `SAFESH_TEST_BIN_DIRS`, so no real tmux or dialog opens.
+//!
+//! Unix only: the fake tmux is a `#!/bin/sh` script, and tmux is a Unix channel.
+#![cfg(unix)]
 
 mod common;
 use common::*;

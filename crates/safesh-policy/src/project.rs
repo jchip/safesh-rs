@@ -81,6 +81,12 @@ fn top_worktree_from_git_dir(git_dir: &str) -> Option<String> {
 fn conventional_worktree_parent(dir: &str, git_file: &str) -> Option<String> {
     let git_dir = read_git_dir_path(dir, git_file)?;
     let parent = top_worktree_from_git_dir(&git_dir)?;
+    if cfg!(windows) {
+        // Below `<parent>\.worktrees`, not the dir itself, in any case and separator spelling.
+        let wts = format!("{parent}\\.worktrees");
+        return (crate::winpath::is_within(dir, &wts) && !crate::winpath::same_path(dir, &wts))
+            .then_some(parent);
+    }
     dir.starts_with(&format!("{parent}/.worktrees/"))
         .then_some(parent)
 }
@@ -183,7 +189,12 @@ pub fn find_project_root(cwd: &Path, opts: FindProjectRootOptions, env: &HostEnv
     let mut nearest: Option<String> = None;
     let mut dir = cwd_s.clone();
     loop {
-        if opts.stop_at_home && !home.is_empty() && dir == home {
+        let at_home = if cfg!(windows) {
+            crate::winpath::same_path(&dir, &home)
+        } else {
+            dir == home
+        };
+        if opts.stop_at_home && !home.is_empty() && at_home {
             break;
         }
         if let Some(p) = conventional_worktree_parent(&dir, &format!("{dir}/.git")) {
@@ -197,10 +208,15 @@ pub fn find_project_root(cwd: &Path, opts: FindProjectRootOptions, env: &HostEnv
                 nearest.get_or_insert_with(|| dir.clone());
             }
         }
-        // Strip the last segment; stop at the filesystem root.
-        let parent = match dir.rfind('/') {
-            Some(i) => dir[..i].to_string(),
-            None => dir.clone(),
+        // Strip the last segment; stop at the filesystem root. Windows: either separator, and
+        // `C:\` has no parent.
+        let parent = if cfg!(windows) {
+            parent_dir(&dir).unwrap_or_else(|| dir.clone())
+        } else {
+            match dir.rfind('/') {
+                Some(i) => dir[..i].to_string(),
+                None => dir.clone(),
+            }
         };
         if parent == dir || parent.is_empty() {
             break;

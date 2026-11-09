@@ -32,6 +32,12 @@ pub(crate) const DEVICE_PATHS: [&str; 5] = [
 
 pub(crate) fn is_device(path: &str) -> bool {
     // Not `Path::is_absolute`: on Windows `/dev/null` has no drive, so it isn't absolute there.
+    // Windows `normalize` joins with `\`, so compare in `/` spelling.
     path.starts_with('/')
-        && DEVICE_PATHS.contains(&normalize(Path::new(path)).to_string_lossy().as_ref())
+        && DEVICE_PATHS.contains(
+            &normalize(Path::new(path))
+                .to_string_lossy()
+                .replace('\\', "/")
+                .as_str(),
+        )
 }

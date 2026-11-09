@@ -4,6 +4,16 @@ use safesh_policy::host::HostEnv;
 use safesh_policy::paths::*;
 use tempfile::TempDir;
 
+/// Real path without the `\\?\` prefix Windows adds, as safesh spells paths.
+fn canon(p: &Path) -> PathBuf {
+    let real = std::fs::canonicalize(p).unwrap();
+    let s = real.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
+        _ => real,
+    }
+}
+
 fn env(home: &str) -> HostEnv {
     HostEnv {
         home: PathBuf::from(home),
@@ -113,6 +123,10 @@ fn pd_4_project_prefix() {
     assert!(!is_within_project_dir("/proj", "/project", Path::new("/")));
 }
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pd_5_project_relative() {
     assert!(is_within_project_dir(
         "./src/file.ts",
@@ -129,6 +143,10 @@ fn pd_6_project_relative_escape() {
     ));
 }
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pd_7_command_relative() {
     assert!(is_command_within_project_dir(
         "./scripts/build.sh",
@@ -262,6 +280,10 @@ fn tp_10_allowed_dotdot() {
     ));
 }
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn tp_11_allowed_relative() {
     assert!(is_path_allowed(
         "src/file.ts",
@@ -282,7 +304,7 @@ fn perm_1_temp_strips_trailing_slash() {
 fn perm_2_temp_includes_real_path() {
     let t = TempDir::new().unwrap();
     let lit = s(t.path());
-    let real = s(&std::fs::canonicalize(t.path()).unwrap());
+    let real = s(&canon(t.path()));
     let r = compute_temp_dir_defaults(Some(&format!("{lit}/")));
     assert!(r.contains(&lit));
     assert!(r.contains(&real));
@@ -299,6 +321,7 @@ fn perm_4_temp_none() {
     assert!(!r.iter().any(|d| d.starts_with("/var/folders")));
 }
 #[test]
+#[cfg_attr(windows, ignore = "Unix PATH syntax (:)")]
 fn perm_7_path_dirs() {
     let r = compute_path_dir_defaults(Some("/usr/bin:/bin:/usr/bin:/opt/x/:.::relative".as_ref()));
     assert_eq!(r, ["/usr/bin", "/bin", "/opt/x"]);
@@ -309,6 +332,7 @@ fn perm_8_path_dirs_empty() {
     assert!(compute_path_dir_defaults(Some("".as_ref())).is_empty());
 }
 #[test]
+#[cfg(unix)] // symlinks need admin or Developer Mode on Windows
 fn perm_11_home_dot_dirs() {
     let h = TempDir::new().unwrap();
     for d in [".cache", ".config", "visible"] {
@@ -332,7 +356,7 @@ fn perm_12_home_dot_dirs_invalid() {
 #[test]
 fn resolve_existing_file() {
     let t = TempDir::new().unwrap();
-    let real = std::fs::canonicalize(t.path()).unwrap();
+    let real = canon(t.path());
     std::fs::write(real.join("f.txt"), "x").unwrap();
     let r = resolve_path(&t.path().join("f.txt"), Path::new("/"));
     assert_eq!(r, real.join("f.txt"));
@@ -340,16 +364,17 @@ fn resolve_existing_file() {
 #[test]
 fn resolve_missing_file_in_existing_dir() {
     let t = TempDir::new().unwrap();
-    let real = std::fs::canonicalize(t.path()).unwrap();
+    let real = canon(t.path());
     let r = resolve_path(&t.path().join("new/deep/file.txt"), Path::new("/"));
     assert_eq!(r, real.join("new/deep/file.txt"));
 }
 #[test]
+#[cfg(unix)] // symlinks need admin or Developer Mode on Windows
 fn resolve_symlink_escaping_dir() {
     let t = TempDir::new().unwrap();
-    let real = std::fs::canonicalize(t.path()).unwrap();
+    let real = canon(t.path());
     let outside = TempDir::new().unwrap();
-    let outside_real = std::fs::canonicalize(outside.path()).unwrap();
+    let outside_real = canon(outside.path());
     std::fs::write(outside_real.join("secret"), "x").unwrap();
     std::os::unix::fs::symlink(&outside_real, real.join("link")).unwrap();
     let r = resolve_path(&real.join("link/secret"), Path::new("/"));
@@ -362,12 +387,16 @@ fn resolve_symlink_escaping_dir() {
 #[test]
 fn resolve_relative_with_dotdot() {
     let t = TempDir::new().unwrap();
-    let real = std::fs::canonicalize(t.path()).unwrap();
+    let real = canon(t.path());
     std::fs::create_dir(real.join("a")).unwrap();
     let r = resolve_path(Path::new("../a/./x.txt"), &real.join("a"));
     assert_eq!(r, real.join("a/x.txt"));
 }
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn resolve_dotdot_past_root_and_private_tmp_fold() {
     assert_eq!(
         resolve_path(Path::new("/../../nonexistent-safesh-x"), Path::new("/")),

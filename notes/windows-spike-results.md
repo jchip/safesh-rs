@@ -25,7 +25,7 @@ WSL2 was not tested. The WSL Rust is 1.88, and the workspace needs 1.89 (`File::
 
 The vendored brush-core, with the `check_open` patch, compiled with no changes. The shims are about 50 lines plus `compat.rs`. macOS still builds, clippy is clean, and all 695 tests pass.
 
-Tests: the 20 lib and bin unit tests pass on Windows. Eight integration-test files use `std::os::unix` directly (symlinks, modes, uid) and do not compile there. Most of the real coverage sits in those files.
+Tests: the 20 lib and bin unit tests pass on Windows. Eight integration-test files use `std::os::unix` directly (symlinks, modes, uid) and do not compile there. Most of the real coverage sits in those files. *(Item 7 makes the whole suite build and pass there; see section 10.)*
 
 ## 2. Behavior (Git Bash, `target/release/safesh.exe`, no user config)
 
@@ -47,7 +47,7 @@ Tests: the 20 lib and bin unit tests pass on Windows. Eight integration-test fil
 4. **State-dir protection.** *(Fixed, see section 7.)* With no mode bits, approval and once-grant files inherit the parent's ACL. The deny-write list still guards them from the agent's shell, but other local users are not kept out. That needs an owner-only DACL.
 5. **Scratchpad trust.** *(Fixed, see section 8.)* Claude Code's Windows scratchpad layout and ownership check are unknown. Trust is off for now, which fails closed.
 6. **Approval channels.** *(Fixed, see section 9.)* tmux and GUI are Unix-only. Windows needs its own channel, such as a `MessageBox` or a Windows Terminal pane.
-7. **Tests.** Port the integration tests behind `cfg(unix)`, or give them Windows equivalents, and add a `windows-latest` CI job.
+7. **Tests.** *(Fixed, see section 10.)* Port the integration tests behind `cfg(unix)`, or give them Windows equivalents, and add a `windows-latest` CI job.
 
 ## 4. Not tried
 
@@ -92,7 +92,6 @@ Still open:
 - **`#!` scripts don't start.** brush launches programs directly, and Windows has no shebang support, so `./run.sh` or `$PAD/run.sh` fails with `failed to execute command` (rc 126) after the gate allows it. Git Bash itself runs them through MSYS. Running scripts needs brush to read the `#!` line and launch the interpreter.
 - Globs over Git Bash paths (`/c/Users/*`) were not tried.
 - **Allow rules bypass resolution, on every platform.** When an argv `allow` rule matches by basename, `check_exec` skips `check_run`. So `/any/dir/git status` passes a `git status` allow rule. Confirmed on macOS. Windows extension stripping widens the match a little, so `git.cmd` matches too.
-- Item 7 above.
 
 ## 6. Item 3 fixed
 
@@ -174,4 +173,29 @@ Verified on Legion, in the logged-on console session, through a scheduled task (
 Unit tests, all platforms: base64 vectors, hostile text reaching the child only through env with exactly six env vars set, no cmdlets in the script, and availability (desktop session yes; no `SESSIONNAME`, any SSH var, no PowerShell or no Windows dir: no). macOS: all 715 tests pass, and clippy is clean on macOS and for `aarch64-pc-windows-msvc`.
 
 Not tested: a real Claude Code hook prompt through the dialog. The hook calls the same `ask_user` as `approve-ask`, and Claude Code on Legion isn't logged in.
+
+## 10. Item 7 fixed
+
+The whole test suite now builds and passes on Windows, and CI has a `windows-latest` job.
+
+**Result on Legion:** `cargo test --workspace` gives 632 passed, 0 failed and 36 ignored. The doc-tests pass too (see the rustdoc note below). `cargo clippy --workspace --all-targets -- -D warnings` is clean. macOS: 715 passed, clippy clean, and `cargo fmt --check` clean. Three files from items 3 to 5 had needed `cargo fmt`, which CI's lint job would have caught.
+
+**How each test was handled:**
+- **Compiles everywhere.** The exec-bit helpers are no-ops on Windows, and the mode assertions are `cfg(unix)` (the DACL is covered by `compat`'s unit tests). The symlink tests are `cfg(unix)`, because Windows needs admin or Developer Mode to make one. Three files are `#![cfg(unix)]`: `e2e_approval.rs` and `e2e_hook_approval.rs` (fake `#!/bin/sh` tmux; the Windows dialog has unit tests) and `scratchpad.rs` (the `/tmp/claude-<uid>` layout; Windows has unit tests).
+- **Ported.** A `canon` helper drops `\\?\` from canonical paths, as safesh does. The PATH fixture uses `git.exe`. The e2e `Env` runs scripts with Git Bash (found through `winpath::mounts()`), keeps `SystemRoot`, `PATHEXT` and `COMSPEC`, sets `TEMP` and `USERPROFILE`, and puts Git's `usr\bin` on `PATH`, as Git Bash does. Runtime-denial targets are `/c/Windows/<name>` instead of `/etc/<name>`. Config JSON is built with `serde_json`, not by pasting in a path. Script paths use `/`.
+- **Ignored on Windows, with the reason in `ignore = "..."`.** 36 tests: Unix path literals, where `/base` or `/a` is a Git Bash path on Windows (`/a` is drive A:); one Unix PATH-syntax test; and two e2e tests whose fake tool is a `#!` script. They still build on Windows and show as ignored.
+
+**Real Windows bugs the suite found, fixed:**
+- **Project root never walked up.** `find_project_root` stripped the last part with `rfind('/')`. Claude Code's cwd on Windows uses `\`, so from any subdir the project root was the cwd itself. It now uses `Path::parent` on Windows and compares home without case.
+- **`.worktrees` checkouts weren't mapped** to their parent project. The `{parent}/.worktrees/` prefix test now uses `winpath::is_within` on Windows.
+- **`> /dev/null` counted as a file open.** `is_device` compared the Windows-normalized `\dev\null` with `/dev/null`.
+- **Rules naming a Windows path never matched.** Rule globs read `\` as an escape, so `C:\Tools\deploy.exe` became `C:Toolsdeploy.exe`. On Windows an absolute-path pattern now compares in `/` spelling and without case; `*` and `?` still work. There's a new Windows-only test in `rules.rs`.
+
+**Test isolation on Windows.** The user temp dir is under the profile. With the walk-up fix, the project search from a temp fixture passes `proj\.git` and finds the profile's own `.claude`, so every e2e test took `C:\Users\joel1` as its project. One run wrote a session grant to `C:\Users\joel1\.temp\safesh\session-s1.json`, and later tests then saw it. I deleted it. Fixtures that depend on the project search (the e2e `Env`, `project.rs`, `fx_outside_repo`) now live under `%SystemDrive%\safesh-test-tmp`. Later runs wrote nothing under the profile or `C:\Windows`. Real sessions are fine: the walk stops at the user's home before checking it.
+
+**rustdoc on Legion:** `~\.cargo\bin\rustdoc.exe` is a symlink to `rustup.exe`, and Windows refuses to follow a user-made symlink from an elevated process (the SSH session), with `os error 448`. Cargo finds rustdoc on PATH, so the doc-tests fail to launch there. With `RUSTDOC` set to `rustup which rustdoc` they pass. This is the box's setup, not the code.
+
+**CI:** a new `windows` job on `windows-latest` with `shell: bash` (Git Bash). It runs clippy with `-D warnings` on the lint job's pinned 1.95.0, then `cargo test`, a release build, the same `safesh check 'ls | wc -l'` smoke test (checked on Legion), and uploads a zip. It has not run yet, because the branch isn't pushed. Clippy 1.95 may report lints that 1.94.1 on Legion does not.
+
+**Coverage still missing on Windows:** the tmux and hook-approval e2e flows (Unix fakes), `#!` script execution, and the symlink cases.
 

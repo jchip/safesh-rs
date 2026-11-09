@@ -28,7 +28,7 @@ fn cl_6_global_workspace_dir_sets_alias() {
     let w = t.path().join("workspace");
     write(
         &get_global_config_json_path(&env),
-        &format!(r#"{{"workspaceDir":"{}"}}"#, w.display()),
+        &serde_json::json!({ "workspaceDir": w }).to_string(),
     );
     let c = load_config(t.path(), None, &env).unwrap().config;
     assert_eq!(c.workspace_dir.as_deref(), w.to_str());

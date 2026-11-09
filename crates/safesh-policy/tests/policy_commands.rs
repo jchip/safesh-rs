@@ -33,6 +33,10 @@ fn cmd_29_no_descriptors() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn cmd_30_absolute_descriptor() {
     assert_eq!(
         cwds("./gradlew", Some(&[Some("/ws/pkg")])),

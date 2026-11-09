@@ -1,3 +1,6 @@
+//! The Unix layout, `/tmp/claude-<uid>`. The Windows layout has unit tests in `scratchpad`.
+#![cfg(unix)]
+
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, symlink};
 use std::path::PathBuf;

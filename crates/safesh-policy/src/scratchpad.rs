@@ -108,7 +108,10 @@ fn windows_claude_root() -> Option<&'static str> {
             return None;
         }
         let real = fs_err::canonicalize(&tmp).map_or(tmp, |p| p.to_string_lossy().into_owned());
-        Some(format!("{}\\claude", crate::winpath::normalize(&real).trim_end_matches('\\')))
+        Some(format!(
+            "{}\\claude",
+            crate::winpath::normalize(&real).trim_end_matches('\\')
+        ))
     })
     .as_deref()
 }
@@ -122,8 +125,7 @@ fn owns_claude_dir(uid: u32) -> bool {
 /// Claude Code session leaves as owner.
 #[cfg(windows)]
 fn owns_claude_dir(_uid: u32) -> bool {
-    windows_claude_root()
-        .is_some_and(|r| crate::compat::dir_owned_by_user_or_admins(Path::new(r)))
+    windows_claude_root().is_some_and(|r| crate::compat::dir_owned_by_user_or_admins(Path::new(r)))
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -203,16 +205,34 @@ mod tests {
 
     #[test]
     fn windows_under_pad() {
-        assert!(is_under_windows_root(&format!(r"{}\run.sh", pad()), SID, ROOT));
-        assert!(is_under_windows_root(&format!(r"{}\a\b.sh", pad()), SID, ROOT));
+        assert!(is_under_windows_root(
+            &format!(r"{}\run.sh", pad()),
+            SID,
+            ROOT
+        ));
+        assert!(is_under_windows_root(
+            &format!(r"{}\a\b.sh", pad()),
+            SID,
+            ROOT
+        ));
     }
 
     #[test]
     fn windows_case_separators_and_verbatim_prefix() {
-        let p = format!(r"{}/Run.sh", pad()).to_uppercase().replace('\\', "/");
+        let p = format!(r"{}/Run.sh", pad())
+            .to_uppercase()
+            .replace('\\', "/");
         assert!(is_under_windows_root(&p, SID, ROOT));
-        assert!(is_under_windows_root(&format!(r"\\?\{}\run.sh", pad()), SID, ROOT));
-        assert!(is_under_windows_root(&format!(r"{}\run.sh", pad()), SID, &format!(r"{ROOT}\")));
+        assert!(is_under_windows_root(
+            &format!(r"\\?\{}\run.sh", pad()),
+            SID,
+            ROOT
+        ));
+        assert!(is_under_windows_root(
+            &format!(r"{}\run.sh", pad()),
+            SID,
+            &format!(r"{ROOT}\")
+        ));
     }
 
     #[test]
@@ -232,4 +252,3 @@ mod tests {
         reject(&format!(r"{ROOT}\C--p\{SID}\tasks\run.sh"));
     }
 }
-

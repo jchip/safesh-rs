@@ -28,9 +28,21 @@ fn no_cfg() -> FindProjectRootOptions {
     }
 }
 
+/// Where test temp dirs go. Windows: `%SystemDrive%\\safesh-test-tmp`, because the user temp dir
+/// sits under the profile, whose `.claude` would count as a project marker above every fixture.
+fn test_tmp_root() -> PathBuf {
+    if cfg!(windows) {
+        let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        let root = PathBuf::from(format!("{drive}\\safesh-test-tmp"));
+        std::fs::create_dir_all(&root).unwrap();
+        return root;
+    }
+    std::env::temp_dir()
+}
+
 // Tests use a fake HOME inside the tmp dir so ambient HOME never matters.
 fn fixture() -> (TempDir, PathBuf, HostEnv) {
-    let t = TempDir::new().unwrap();
+    let t = TempDir::new_in(test_tmp_root()).unwrap();
     let base = t.path().to_path_buf();
     let e = env(&base.join("fake-home"));
     (t, base, e)
@@ -215,6 +227,10 @@ fn pr_17_markers() {
     assert_eq!(PROJECT_MARKERS, [".claude", ".git", ".config/safesh"]);
 }
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pr_18_tilde_expansion() {
     let e = env(Path::new("/Users/test-home"));
     assert_eq!(
@@ -227,6 +243,10 @@ fn pr_18_tilde_expansion() {
     );
 }
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pr_19_absolute_root() {
     let e = env(Path::new("/Users/test-home"));
     assert_eq!(
@@ -235,6 +255,10 @@ fn pr_19_absolute_root() {
     );
 }
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pr_20_nested_dropped() {
     let e = env(Path::new("/Users/test-home"));
     assert_eq!(
@@ -243,6 +267,10 @@ fn pr_20_nested_dropped() {
     );
 }
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pr_normalize_dedupes_and_expand_git_roots() {
     let (_t, b, e) = fixture();
     let e2 = env(Path::new("/h"));

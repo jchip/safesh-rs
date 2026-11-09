@@ -74,7 +74,7 @@ fn outside_write(e: &Env, name: &str) -> (String, std::path::PathBuf) {
     let dir = e.outside.clone();
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join(name);
-    (format!("echo data > {}", f.display()), f)
+    (format!("echo data > {}", sh_word(&f)), f)
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn runtime_block_offers_retry_that_resumes() {
     let dir = e.outside.clone();
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join("rt.txt");
-    let script = format!("x=$(echo touch); $x {}; echo after", f.display());
+    let script = format!("x=$(echo touch); $x {}; echo after", sh_word(&f));
     let h = e.hook(&script);
     assert_eq!(h.decision(), "allow", "{}", h.stdout);
     let r = e.sh(&h.command());

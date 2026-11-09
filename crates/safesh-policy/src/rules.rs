@@ -105,6 +105,17 @@ fn command_name_differs(tok: &str, head: &str) -> bool {
     name != tok && glob_match(head, name)
 }
 
+/// One pattern element against one token. On Windows an absolute-path pattern compares in `/`
+/// spelling and without case: there `\` is the separator, not the glob escape, so a rule naming
+/// `C:\Tools\deploy.exe` would otherwise never match. `*` and `?` still work.
+fn element_matches(head: &str, tok: &str) -> bool {
+    if cfg!(windows) && crate::winpath::is_absolute(head) {
+        let fold = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
+        return glob_match(&fold(head), &fold(tok));
+    }
+    glob_match(head, tok)
+}
+
 /// Prefix match. `first` enables the basename rule for the leading element.
 fn match_prefix(pat: &[String], argv: &[String], first: bool) -> bool {
     let Some((head, rest)) = pat.split_first() else {
@@ -116,7 +127,7 @@ fn match_prefix(pat: &[String], argv: &[String], first: bool) -> bool {
     let Some((tok, tail)) = argv.split_first() else {
         return false;
     };
-    let ok = glob_match(head, tok) || (first && command_name_differs(tok, head));
+    let ok = element_matches(head, tok) || (first && command_name_differs(tok, head));
     ok && match_prefix(rest, tail, false)
 }
 

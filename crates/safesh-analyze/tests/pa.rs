@@ -185,6 +185,10 @@ fn pa_35_cd_unresolved() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pa_36_cd_then_relative_redirect() {
     let a = run("cd /home/u && echo x > .ssh/authorized_keys");
     assert_eq!(redirects(&a), [w(".ssh/authorized_keys")]);
@@ -243,6 +247,10 @@ fn pa_44_cd_dash() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pa_46_and_chain_not_optimistic() {
     let a = run("cd /outside && cd /project\necho secret > x");
     assert_eq!(a.opens[0].cwd, Cwd::Unknown);
@@ -354,6 +362,10 @@ fn pa_62_fd_close_and_move() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pa_63_exec_cwd_after_cd() {
     let a = run("cd /ws/pkg && ./gradlew build");
     assert_eq!(cwd_of(&a, "./gradlew"), known("/ws/pkg"));
@@ -400,12 +412,20 @@ fn pa_70_or_chain_exec_cwd_unknown() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pa_71_cwd_per_call() {
     let a = run("./tool; cd /ws/pkg && ./tool");
     assert_eq!(cwds_of(&a, "./tool"), [known("/base"), known("/ws/pkg")]);
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn pa_pipeline_stage_vars_isolated_but_final_cwd() {
     let a = run("cd sub && make");
     assert_eq!(fin(&a).as_deref(), Some("/base/sub"));

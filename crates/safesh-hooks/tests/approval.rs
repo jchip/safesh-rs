@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -37,17 +38,15 @@ fn write_then_consume_once_with_modes() {
     let d = tempfile::tempdir().unwrap();
     let h = host(&d);
     write_approval(&h, &req("a"), 1_000).unwrap();
-    let dir = h.state_dir.join("approvals");
-    assert_eq!(
-        std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
-        0o700
-    );
     let f = files(&h);
     assert_eq!(f.len(), 1);
-    assert_eq!(
-        std::fs::metadata(&f[0]).unwrap().permissions().mode() & 0o777,
-        0o600
-    );
+    // Windows: the owner-only DACL is covered by `compat`'s unit tests.
+    #[cfg(unix)]
+    {
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&h.state_dir.join("approvals")), 0o700);
+        assert_eq!(mode(&f[0]), 0o600);
+    }
     let body: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&f[0]).unwrap()).unwrap();
     assert_eq!(body["sessionId"], "s");

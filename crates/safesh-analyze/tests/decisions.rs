@@ -3,6 +3,10 @@ use common::*;
 
 // D1: cwd modes.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn d1_non_optimistic_exec_cwd_optimistic_final() {
     let a = run("cd a && cd b\n./t");
     assert_eq!(cwd_of(&a, "./t"), Cwd::Unknown);
@@ -146,6 +150,10 @@ fn d11_glob_targets_unknown() {
 
 // D12: HOME handling.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn d12_cd_home() {
     assert_eq!(fin(&run("cd")).as_deref(), Some("/home/u"));
     assert_eq!(fin(&run("cd ~")).as_deref(), Some("/home/u"));
@@ -316,18 +324,30 @@ fn analyze_big(s: &str) -> bool {
 
 // Loops that do not touch the cwd keep it.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn loop_break_keeps_cwd() {
     let a = run("cd /a && for i in 1 2 3; do curl x && break; sleep 5; done; echo done");
     assert_eq!(fin(&a).as_deref(), Some("/a"));
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn until_with_test_bracket_keeps_cwd() {
     let a = run("cd /a && until [ -f x ]; do sleep 2; done; echo ready");
     assert_eq!(fin(&a).as_deref(), Some("/a"));
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn while_loop_keeps_cwd() {
     assert_eq!(
         fin(&run("cd /a; while true; do sleep 1; done")).as_deref(),
@@ -336,6 +356,10 @@ fn while_loop_keeps_cwd() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn loop_dynamic_name_resolved_keeps_cwd() {
     let a = run("P=/bin/psql; cd /a; for i in 1 2; do $P -c x && break; done");
     assert_eq!(fin(&a).as_deref(), Some("/a"));
@@ -397,6 +421,10 @@ fn pipeline_with_compound_stage_skipped() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Unix path literals: on Windows /x is a Git Bash path"
+)]
 fn loop_subshell_cd_keeps_cwd() {
     let a = run("cd /a && for i in 1 2; do (cd /x && ls); done");
     assert_eq!(fin(&a).as_deref(), Some("/a"));
