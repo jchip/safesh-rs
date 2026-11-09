@@ -1,6 +1,6 @@
 # safesh in Rust: Execution Plan
 
-Status as of 2026-11-06: alpha complete. P0 to P4 are done, and the P5 shadow-mode tooling is in place. A field test with the Rust hook in charge started on 2026-11-06.
+Status as of 2026-11-08: alpha complete. P0 to P4 are done, and the P5 shadow-mode tooling is in place. A field test with the Rust hook in charge started on 2026-11-06. Native Windows under Git Bash (P7) is in `main` as experimental, with a green `windows-latest` CI job. Its known gaps are in the README and `windows-spike-results.md`. WSL2 is not started.
 Related: `design.md` (what and why), `architecture.md` (how it is built).
 
 Each phase has an exit check. Tasks marked **(mech)** are mechanical and go to lower-model subagents. The TS repo stays in use until cutover in P6.
@@ -16,7 +16,7 @@ Each phase has an exit check. Tasks marked **(mech)** are mechanical and go to l
 | P4 | Agent adapters | done |
 | P5 | Shadow mode | tooling done; field test with Rust in charge started 2026-11-06 |
 | P6 | Cutover | not started; needs migration sign-off |
-| P7 | Windows | not started |
+| P7 | Windows | native under Git Bash: experimental, in `main` 2026-11-08, CI green; WSL2 not started |
 
 ## P0. Hands-on spike (done)
 
