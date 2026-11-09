@@ -17,7 +17,7 @@ WSL2 was not tested. The WSL Rust is 1.88, and the workspace needs 1.89 (`File::
 | Site | Unix API | Spike shim |
 |---|---|---|
 | `safesh-policy/src/host.rs` | `rustix::process::getuid` | uid `0` |
-| `safesh-policy/src/scratchpad.rs` | `MetadataExt::uid` | `owns_claude_dir` returns false, so scratchpad trust is off |
+| `safesh-policy/src/scratchpad.rs` | `MetadataExt::uid` | `owns_claude_dir` returned false at first; item 5 checks the dir owner's SID |
 | `safesh-hooks/src/approval.rs`, `safesh-cli/src/approval/{files,once}.rs` | `.mode(0o600/0o700)`, `Permissions::from_mode` | `safesh_policy::compat::fs`: `.mode()` is a no-op; item 4 adds an owner-only DACL on the dirs |
 | `safesh-cli/src/approval/files.rs` | `test_kill_process` for queue-ticket liveness | `compat::pid_alive` returns true for any pid > 0 |
 | `safesh-cli/src/approval/mod.rs` | exec bit in `find_bin` | any file counts |
@@ -45,7 +45,7 @@ Tests: the 20 lib and bin unit tests pass on Windows. Eight integration-test fil
 2. **MSYS paths.** *(Fixed, see section 5.)* Git Bash hands safesh `/c/...`, `/tmp` (which is `%LOCALAPPDATA%\Temp`), `/usr/bin` (which is `C:\Program Files\Git\usr\bin`) and `HOME=/c/Users/...`. Policy needs one translation step, `cygpath` rules or the mount table, before `normalize_lexical`. Without it, `~` and every absolute path are wrong. This is the biggest piece.
 3. **Nested denial.** *(Fixed, see section 6.)* A denied `bash -c` exits 126, and the outer script keeps going. Replace SIGUSR1 with `OpenProcess` plus `TerminateProcess(pid, 126)` on `SAFESH_PARENT_PIDS`.
 4. **State-dir protection.** *(Fixed, see section 7.)* With no mode bits, approval and once-grant files inherit the parent's ACL. The deny-write list still guards them from the agent's shell, but other local users are not kept out. That needs an owner-only DACL.
-5. **Scratchpad trust.** Claude Code's Windows scratchpad layout and ownership check are unknown. Trust is off for now, which fails closed.
+5. **Scratchpad trust.** *(Fixed, see section 8.)* Claude Code's Windows scratchpad layout and ownership check are unknown. Trust is off for now, which fails closed.
 6. **Approval channels.** tmux and GUI are Unix-only. Windows needs its own channel, such as a `MessageBox` or a Windows Terminal pane.
 7. **Tests.** Port the integration tests behind `cfg(unix)`, or give them Windows equivalents, and add a `windows-latest` CI job.
 
@@ -88,10 +88,11 @@ macOS: all 701 tests pass and clippy is clean. Windows: unit tests and clippy ar
 
 Still open:
 - **Arguments to native programs aren't converted.** Git Bash rewrites `/c/x` in arguments for native exes such as `git.exe` and `cargo.exe`, and brush does not. Policy checks `C:\x`, while a native program sees `/c/x` and reads it as `C:\c\x`. MSYS programs such as coreutils `rm` and `ls` read it the way policy does.
-- A path command spelled `/usr/bin/ls` isn't mapped. brush resolves it outside `absolute_path`.
+- A path command spelled `/usr/bin/ls` isn't mapped. brush resolves it outside `absolute_path`. It hits `/tmp/...` too: `cp x /tmp/claude/.../new.exe && /tmp/claude/.../new.exe` passes the pre-check, then is blocked at runtime as `C:/tmp/claude/...`.
+- **`#!` scripts don't start.** brush launches programs directly, and Windows has no shebang support, so `./run.sh` or `$PAD/run.sh` fails with `failed to execute command` (rc 126) after the gate allows it. Git Bash itself runs them through MSYS. Running scripts needs brush to read the `#!` line and launch the interpreter.
 - Globs over Git Bash paths (`/c/Users/*`) were not tried.
 - **Allow rules bypass resolution, on every platform.** When an argv `allow` rule matches by basename, `check_exec` skips `check_run`. So `/any/dir/git status` passes a `git status` allow rule. Confirmed on macOS. Windows extension stripping widens the match a little, so `git.cmd` matches too.
-- Items 5 to 7 above.
+- Items 6 and 7 above.
 
 ## 6. Item 3 fixed
 
@@ -127,4 +128,27 @@ Verified on Legion:
 - End to end, with `SAFESH_STATE_DIR=C:\temp\item4state`: `C:\temp` grants full control to `joel1`, to another local user (`xjchip`), to Administrators and to SYSTEM, and the state root inherits all four. After `hook codex` writes an approval record, `approvals` has only `joel1:(OI)(CI)(F)` and the record has only `joel1:(I)(F)`.
 - All 27 Windows unit tests pass, and the item 3 checks still pass with the moved kill code.
 - macOS: all 707 tests pass, and clippy is clean on macOS and for `aarch64-pc-windows-msvc`.
+
+## 8. Item 5 fixed
+
+Scratchpad trust now works on Windows. The layout comes from Claude Code 2.1.251's Windows build (`claude.exe` on Legion). The scratchpad is `realpath(CLAUDE_CODE_TMPDIR or os.tmpdir()) + \claude\<project>\<session>\scratchpad`. `<project>` is the cwd with every non-alphanumeric char replaced by `-`, cut at 200 chars plus a hash. Node has no `getuid` on Windows, so the root is `claude`, not `claude-<uid>`, and Claude Code skips its own ownership check there. A failed run on Legion created `%TEMP%\claude`, which confirms the root.
+
+- **Lexical check:** `is_under_windows_root` checks that the path sits below `<root>\<project>\<session>\scratchpad\` with something after it. Names compare without case, either separator works, `\\?\` is dropped and `..` is resolved first. It is pure string code, unit-tested on every platform.
+- **Root:** `TEMP`, then `TMP` (Node's order), with a Git Bash spelling mapped, resolved to its real path, plus `\claude`. Like Unix, `CLAUDE_CODE_TMPDIR` is not honored, so a session that sets it gets no trust.
+- **Owner check:** the root must be a real dir, not a symlink or junction, owned by the process user, `BUILTIN\Administrators` or `SYSTEM`. An elevated session's new objects belong to Administrators: Legion's `%TEMP%\claude` is owned by Administrators. Admins and SYSTEM already control the machine, so accepting them gives nothing away. This is `compat::dir_owned_by_user_or_admins` (`GetNamedSecurityInfoW`, `EqualSid`, `IsWellKnownSid`).
+- The existing-file and new-file paths, real-path re-check included, are unchanged and work on Windows paths.
+
+Verified on Legion in Git Bash, through `hook claude` then `run`, no user config. The baseline is the item 4 build.
+
+| Case | Fixed | Baseline |
+|---|---|---|
+| `<pad>\who.exe`, Windows spelling | allow, runs | deny |
+| `/tmp/claude/.../scratchpad/who.exe`, Git Bash spelling | allow, runs | deny |
+| the same exe with another session id | deny | deny |
+| `who.exe` in `%TEMP%\item5-notpad` | deny | deny |
+| `cp ... <pad>/new.exe && <pad>/new.exe` | allow, runs | deny |
+
+The test uses a copy of `whoami.exe`, because `#!` scripts don't start under brush on Windows (see "Still open"). Unit tests on Windows: the owner check accepts a fresh temp dir and rejects a file, a missing path and a junction. All 11 `safesh-policy` lib tests pass. macOS: all 710 tests pass, and clippy is clean on macOS and for `aarch64-pc-windows-msvc`.
+
+Not tested: a root owned by another non-admin user. Making one needs a second account to create it.
 

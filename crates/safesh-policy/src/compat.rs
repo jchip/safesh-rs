@@ -60,6 +60,16 @@ pub fn restrict_dir(dir: &Path) -> io::Result<()> {
     }
 }
 
+/// Windows: whether `path` is a real dir (not a symlink or junction) whose owner is this process's
+/// user, `BUILTIN\Administrators` or `SYSTEM`. The last two already control the machine, and an
+/// elevated session's new objects belong to Administrators, not the user.
+#[cfg(windows)]
+#[must_use]
+pub fn dir_owned_by_user_or_admins(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && !m.is_symlink())
+        && win::owned_by_user_or_admins(path)
+}
+
 /// Whether a process with this pid exists. EPERM counts as alive.
 #[must_use]
 pub fn pid_alive(pid: i32) -> bool {
@@ -96,13 +106,16 @@ mod win {
     use std::path::Path;
     use std::ptr::{null, null_mut};
 
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::Security::Authorization::{SE_FILE_OBJECT, SetNamedSecurityInfoW};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{
+        GetNamedSecurityInfoW, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+    };
     use windows_sys::Win32::Security::{
         ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, AddAccessAllowedAceEx, CONTAINER_INHERIT_ACE,
-        DACL_SECURITY_INFORMATION, GetLengthSid, GetTokenInformation, InitializeAcl,
-        OBJECT_INHERIT_ACE, PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
-        TokenUser,
+        DACL_SECURITY_INFORMATION, EqualSid, GetLengthSid, GetTokenInformation, InitializeAcl,
+        IsWellKnownSid, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, TOKEN_QUERY, TOKEN_USER,
+        TokenUser, WinBuiltinAdministratorsSid, WinLocalSystemSid,
     };
     use windows_sys::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
     use windows_sys::Win32::System::Threading::{
@@ -162,9 +175,48 @@ mod win {
         }
     }
 
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
+    }
+
+    pub(super) fn owned_by_user_or_admins(path: &Path) -> bool {
+        let Ok(user) = token_user() else {
+            return false;
+        };
+        let wide = wide(path);
+        let mut owner: PSID = null_mut();
+        let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: `wide` is NUL-terminated. On success `owner` points into `sd`, which the system
+        // allocated and we free once, after the last use of `owner`. The user SID lives in `user`.
+        unsafe {
+            let rc = GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                &raw mut owner,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                &raw mut sd,
+            );
+            if rc != 0 || owner.is_null() {
+                if !sd.is_null() {
+                    LocalFree(sd);
+                }
+                return false;
+            }
+            let user_sid = (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid;
+            let ok = EqualSid(owner, user_sid) != 0
+                || IsWellKnownSid(owner, WinBuiltinAdministratorsSid) != 0
+                || IsWellKnownSid(owner, WinLocalSystemSid) != 0;
+            LocalFree(sd);
+            ok
+        }
+    }
+
     pub(super) fn restrict_dir(dir: &Path) -> io::Result<()> {
         let user = token_user()?;
-        let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
+        let wide = wide(dir);
         // SAFETY: `user` holds a `TOKEN_USER` whose SID lives in `user`, which outlives every use
         // here. The ACL buffer is DWORD-aligned and sized for the header plus one ACE with that
         // SID, the size `InitializeAcl` and `AddAccessAllowedAceEx` require. `wide` is
@@ -216,6 +268,30 @@ mod win {
                 .take_while(|l| !l.is_empty())
                 .map(str::to_string)
                 .collect()
+        }
+
+        #[test]
+        fn owner_check_accepts_own_dir_and_rejects_links_and_files() {
+            let t = tempfile::tempdir().unwrap();
+            let d = t.path().join("mine");
+            std::fs::create_dir(&d).unwrap();
+            assert!(super::super::dir_owned_by_user_or_admins(&d));
+            let f = t.path().join("file");
+            std::fs::write(&f, "").unwrap();
+            assert!(!super::super::dir_owned_by_user_or_admins(&f));
+            assert!(!super::super::dir_owned_by_user_or_admins(&t.path().join("missing")));
+            // A junction needs no privilege, unlike a symlink.
+            let j = t.path().join("junction");
+            let ok = std::process::Command::new("cmd")
+                .args(["/c", "mklink", "/J"])
+                .arg(&j)
+                .arg(&d)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "mklink /J failed");
+            assert!(!super::super::dir_owned_by_user_or_admins(&j));
         }
 
         #[test]

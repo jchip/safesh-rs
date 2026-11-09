@@ -37,7 +37,7 @@ impl HostEnv {
             claude_project_dir: var("CLAUDE_PROJECT_DIR").map(PathBuf::from),
             #[cfg(unix)]
             uid: rustix::process::getuid().as_raw(),
-            // SPIKE(windows): no uid; 0 never matches a real claude-<uid> dir check.
+            // Windows has no uid. Scratchpad trust there keys on `TEMP` and the dir owner instead.
             #[cfg(not(unix))]
             uid: 0,
             state_dir: var("SAFESH_STATE_DIR").map_or_else(default_state_dir, PathBuf::from),
