@@ -30,9 +30,25 @@ fn approval_missing_block_gives_defaults() {
     let c: Config = serde_json::from_str("{}").unwrap();
     assert!(c.approval.is_none());
     let r = ApprovalConfig::resolved(c.approval.as_ref());
-    assert_eq!(r.channels, s(&["ask", "tmux", "gui"]));
+    assert_eq!(r.channels, s(&["toa", "ask", "tmux", "gui"]));
     assert_eq!(r.timeout, Duration::from_secs(60));
     assert_eq!(r.runtime_timeout, Duration::from_secs(45));
+}
+
+#[test]
+fn approval_toa_channel_validates_cleanly() {
+    let mut c = with(ApprovalConfig {
+        channels: Some(s(&["toa", "tmux", "gui", "ask"])),
+        ..ApprovalConfig::default()
+    });
+    c.project_dir = Some("/proj".to_string());
+    let v = validate_config(&c);
+    assert!(
+        v.warnings.is_empty(),
+        "expected no warnings for valid channels including toa, got: {:?}",
+        v.warnings
+    );
+    assert!(v.errors.is_empty());
 }
 
 #[test]

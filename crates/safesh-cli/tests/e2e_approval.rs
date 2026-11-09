@@ -70,6 +70,7 @@ impl T {
             .args(extra)
             .env_remove("SAFESH_APPROVAL")
             .env_remove("SSH_CONNECTION")
+            .env_remove("SSH_CLIENT")
             .env_remove("SSH_TTY")
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")

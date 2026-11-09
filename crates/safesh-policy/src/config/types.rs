@@ -57,7 +57,7 @@ pub struct EnvConfig {
 }
 
 /// Approval channel names this version knows.
-pub const KNOWN_APPROVAL_CHANNELS: &[&str] = &["ask", "tmux", "gui"];
+pub const KNOWN_APPROVAL_CHANNELS: &[&str] = &["toa", "ask", "tmux", "gui"];
 
 /// Interactive approval settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -233,4 +233,51 @@ pub fn extra_key_warnings(label: &str, extra: &BTreeMap<String, Value>) -> Vec<S
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_approval_channels_contains_toa() {
+        assert!(
+            KNOWN_APPROVAL_CHANNELS.contains(&"toa"),
+            "KNOWN_APPROVAL_CHANNELS should include 'toa'"
+        );
+        assert_eq!(
+            KNOWN_APPROVAL_CHANNELS,
+            &["toa", "ask", "tmux", "gui"]
+        );
+    }
+
+    #[test]
+    fn approval_config_resolved_defaults_include_toa() {
+        let resolved = ApprovalConfig::resolved(None);
+        assert_eq!(
+            resolved.channels,
+            vec!["toa", "ask", "tmux", "gui"]
+        );
+    }
+
+    #[test]
+    fn approval_config_resolved_custom_channels_with_toa() {
+        let cfg = ApprovalConfig {
+            channels: Some(vec![
+                "toa".to_string(),
+                "tmux".to_string(),
+                "gui".to_string(),
+                "ask".to_string(),
+            ]),
+            timeout_sec: Some(30),
+            runtime_timeout_sec: Some(15),
+        };
+        let resolved = ApprovalConfig::resolved(Some(&cfg));
+        assert_eq!(
+            resolved.channels,
+            vec!["toa", "tmux", "gui", "ask"]
+        );
+        assert_eq!(resolved.timeout, Duration::from_secs(30));
+        assert_eq!(resolved.runtime_timeout, Duration::from_secs(15));
+    }
 }

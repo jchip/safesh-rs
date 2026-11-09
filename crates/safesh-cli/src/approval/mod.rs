@@ -8,8 +8,15 @@ mod files;
 mod gui;
 pub mod once;
 mod proc;
+pub mod toa;
 mod tmux;
 pub mod ui;
+
+#[allow(unused_imports)]
+pub use toa::{
+    ApprovalOutcome, CommandApprovalRequest, PathAccessMode, PathApprovalOutcome,
+    PathApprovalRequest, ToaChannel, resolve_approval, resolve_path_approval,
+};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -185,6 +192,11 @@ impl Env {
         "SSH_TTY",
         // Windows: `Console` or `RDP-Tcp#N` in a desktop session; unset over SSH and in services.
         "SESSIONNAME",
+        // TOA Gateway and Host Engine environment variables.
+        "TOA_GATEWAY_URL",
+        "TOA_HOOK_TOKEN",
+        "TOA_TERMINAL_ID",
+        "TOA_API_DISCOVERY",
     ];
 
     #[cfg(not(windows))]
@@ -265,9 +277,10 @@ pub trait Channel {
     fn ask(&self, env: &Env, prompt: &Prompt, deadline: Instant) -> Option<Choice>;
 }
 
-/// Popup channels by config name. `ask` is not here: it is hook output, not a popup.
+/// Approval channels by config name. `ask` is not here: it is hook output, not a channel driver.
 fn channel(name: &str) -> Option<Box<dyn Channel>> {
     match name {
+        "toa" => Some(Box::new(toa::ToaChannel)),
         "tmux" => Some(Box::new(tmux::Tmux)),
         "gui" => Some(Box::new(gui::Gui)),
         _ => None,
@@ -303,10 +316,14 @@ pub fn ask_with(
     if env.var("SAFESH_APPROVAL") == Some("off") {
         return None;
     }
-    let ch = channels.iter().find(|c| c.available(env))?;
     let _turn = files::Queue::wait_turn(&env.state_dir, &prompt.id, timing.give_up_at)?;
     let deadline = (Instant::now() + timing.show).min(timing.give_up_at);
-    ch.ask(env, prompt, deadline)
+    for ch in channels.iter().filter(|c| c.available(env)) {
+        if let Some(choice) = ch.ask(env, prompt, deadline) {
+            return Some(choice);
+        }
+    }
+    None
 }
 
 /// `safesh approve-ask`: shows one prompt and prints the choice. For manual and integration
