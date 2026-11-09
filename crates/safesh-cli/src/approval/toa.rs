@@ -1,7 +1,7 @@
 //! TOA (Team of Agents) approval channel.
 //!
 //! Submits interactive approval requests to TOA Gateway Server via HTTP/1.1 loopback
-//! (`POST /v1/approvals`) and maps decisions back to SafeShell approval choices.
+//! (`POST /v1/approvals`) and maps decisions back to `SafeShell` approval choices.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -19,18 +19,22 @@ thread_local! {
 }
 
 #[cfg(test)]
+struct ResetGuard;
+
+#[cfg(test)]
+impl Drop for ResetGuard {
+    fn drop(&mut self) {
+        TEST_OVERRIDE_ENV.with(|cell| {
+            *cell.borrow_mut() = None;
+        });
+    }
+}
+
+#[cfg(test)]
 pub fn with_test_env<R>(env: Env, f: impl FnOnce() -> R) -> R {
     TEST_OVERRIDE_ENV.with(|cell| {
         *cell.borrow_mut() = Some(env);
     });
-    struct ResetGuard;
-    impl Drop for ResetGuard {
-        fn drop(&mut self) {
-            TEST_OVERRIDE_ENV.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
     let _guard = ResetGuard;
     f()
 }
@@ -99,7 +103,7 @@ pub enum ApprovalOutcome {
 impl ApprovalOutcome {
     #[allow(dead_code)]
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::AllowOnce => "allow_once",
             Self::AllowSession => "allow_session",
@@ -134,7 +138,7 @@ pub enum PathAccessMode {
 impl PathAccessMode {
     #[allow(dead_code)]
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Read => "read",
             Self::Write => "write",
@@ -277,7 +281,7 @@ fn parse_runtime_file(path: &Path) -> Option<(Option<String>, Option<String>)> {
         .map(String::from)
         .or_else(|| {
             v.get("port")
-                .and_then(|p| p.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .map(|p| format!("http://127.0.0.1:{p}"))
         });
 
@@ -301,12 +305,20 @@ pub fn discover_toa(env: Option<&Env>) -> Option<ToaDiscovery> {
     let mut gateway_url = env
         .and_then(|e| e.var("TOA_GATEWAY_URL"))
         .map(String::from)
-        .or_else(|| std::env::var("TOA_GATEWAY_URL").ok().filter(|s| !s.is_empty()));
+        .or_else(|| {
+            std::env::var("TOA_GATEWAY_URL")
+                .ok()
+                .filter(|s| !s.is_empty())
+        });
 
     let mut hook_token = env
         .and_then(|e| e.var("TOA_HOOK_TOKEN"))
         .map(String::from)
-        .or_else(|| std::env::var("TOA_HOOK_TOKEN").ok().filter(|s| !s.is_empty()));
+        .or_else(|| {
+            std::env::var("TOA_HOOK_TOKEN")
+                .ok()
+                .filter(|s| !s.is_empty())
+        });
 
     // If either is missing, check ~/.toa/runtime.json
     if gateway_url.is_none() || hook_token.is_none() {
@@ -333,14 +345,12 @@ pub fn discover_toa(env: Option<&Env>) -> Option<ToaDiscovery> {
             .and_then(|e| e.var("TOA_API_DISCOVERY"))
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("TOA_API_DISCOVERY").map(PathBuf::from));
-        if let Some(path) = disco_path {
-            if let Some((url, token)) = parse_runtime_file(&path) {
-                if gateway_url.is_none() {
-                    gateway_url = url;
-                }
-                if hook_token.is_none() {
-                    hook_token = token;
-                }
+        if let Some((url, token)) = disco_path.as_deref().and_then(parse_runtime_file) {
+            if gateway_url.is_none() {
+                gateway_url = url;
+            }
+            if hook_token.is_none() {
+                hook_token = token;
             }
         }
     }
@@ -351,7 +361,11 @@ pub fn discover_toa(env: Option<&Env>) -> Option<ToaDiscovery> {
     let terminal_id = env
         .and_then(|e| e.var("TOA_TERMINAL_ID"))
         .map(String::from)
-        .or_else(|| std::env::var("TOA_TERMINAL_ID").ok().filter(|s| !s.is_empty()));
+        .or_else(|| {
+            std::env::var("TOA_TERMINAL_ID")
+                .ok()
+                .filter(|s| !s.is_empty())
+        });
 
     Some(ToaDiscovery {
         gateway_url: gateway_url.trim_end_matches('/').to_string(),
@@ -442,24 +456,25 @@ fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
                 if header_len.is_none() {
-                    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let pos = buf.windows(4).position(|w| w == b"\r\n\r\n");
+                    if let Some(pos) = pos {
                         let hlen = pos + 4;
                         header_len = Some(hlen);
                         let headers_str = String::from_utf8_lossy(&buf[..pos]);
                         for line in headers_str.lines() {
-                            if let Some((k, v)) = line.split_once(':') {
-                                if k.trim().eq_ignore_ascii_case("content-length") {
-                                    if let Ok(cl) = v.trim().parse::<usize>() {
-                                        content_length = Some(cl);
-                                    }
-                                }
+                            let Some((k, v)) = line.split_once(':') else {
+                                continue;
+                            };
+                            if k.trim().eq_ignore_ascii_case("content-length") {
+                                content_length = v.trim().parse::<usize>().ok();
                             }
                         }
                     }
                 }
                 if let (Some(hlen), Some(clen)) = (header_len, content_length) {
-                    if buf.len() >= hlen + clen {
-                        buf.truncate(hlen + clen);
+                    let total = hlen + clen;
+                    if buf.len() >= total {
+                        buf.truncate(total);
                         break;
                     }
                 }
@@ -471,11 +486,7 @@ fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u
     let hlen = header_len?;
     let headers_str = std::str::from_utf8(&buf[..hlen]).ok()?;
     let status_line = headers_str.lines().next()?;
-    let status_code = status_line
-        .split_whitespace()
-        .nth(1)?
-        .parse::<u16>()
-        .ok()?;
+    let status_code = status_line.split_whitespace().nth(1)?.parse::<u16>().ok()?;
     let body_str = std::str::from_utf8(&buf[hlen..]).ok()?.to_string();
 
     Some((status_code, body_str))
@@ -510,7 +521,7 @@ pub fn send_command_request(
     }
 
     let val: serde_json::Value = serde_json::from_str(&resp_body).ok()?;
-    if val.get("fallback").and_then(|v| v.as_bool()) == Some(true) {
+    if val.get("fallback").and_then(serde_json::Value::as_bool) == Some(true) {
         return None;
     }
 
@@ -554,7 +565,7 @@ pub fn send_path_request(
     }
 
     let val: serde_json::Value = serde_json::from_str(&resp_body).ok()?;
-    if val.get("fallback").and_then(|v| v.as_bool()) == Some(true) {
+    if val.get("fallback").and_then(serde_json::Value::as_bool) == Some(true) {
         return None;
     }
 
@@ -566,7 +577,6 @@ pub fn send_path_request(
     let access = match access_str {
         "read" => PathAccessMode::Read,
         "write" => PathAccessMode::Write,
-        "read_write" | "rw" | "readwrite" => PathAccessMode::ReadWrite,
         _ => PathAccessMode::ReadWrite,
     };
 
@@ -587,19 +597,10 @@ pub fn resolve_approval_with_env(
     req: &CommandApprovalRequest,
 ) -> Option<ApprovalOutcome> {
     for ch in channels {
-        match ch.as_ref() {
-            "toa" => {
-                if let Some(disco) = discover_toa(env) {
-                    if let Some(outcome) = send_command_request(&disco, req) {
-                        return Some(outcome);
-                    }
-                }
-            }
-            "ask" => {
-                // "ask" is the text fallback channel handled by the caller/CLI.
-                continue;
-            }
-            _ => continue,
+        if ch.as_ref() == "toa"
+            && let Some(outcome) = discover_toa(env).and_then(|d| send_command_request(&d, req))
+        {
+            return Some(outcome);
         }
     }
     None
@@ -622,18 +623,10 @@ pub fn resolve_path_approval_with_env(
     req: &PathApprovalRequest,
 ) -> Option<PathApprovalOutcome> {
     for ch in channels {
-        match ch.as_ref() {
-            "toa" => {
-                if let Some(disco) = discover_toa(env) {
-                    if let Some(outcome) = send_path_request(&disco, req) {
-                        return Some(outcome);
-                    }
-                }
-            }
-            "ask" => {
-                continue;
-            }
-            _ => continue,
+        if ch.as_ref() == "toa"
+            && let Some(outcome) = discover_toa(env).and_then(|d| send_path_request(&d, req))
+        {
+            return Some(outcome);
         }
     }
     None
@@ -728,9 +721,7 @@ mod tests {
             let reqs_clone = Arc::clone(&requests);
             let shutdown_clone = Arc::clone(&shutdown);
 
-            listener
-                .set_nonblocking(true)
-                .expect("set nonblocking");
+            listener.set_nonblocking(true).expect("set nonblocking");
 
             let handle = std::thread::spawn(move || {
                 while !shutdown_clone.load(std::sync::atomic::Ordering::Relaxed) {
@@ -747,25 +738,26 @@ mod tests {
                                     Ok(n) => {
                                         buf.extend_from_slice(&chunk[..n]);
                                         if header_len.is_none() {
-                                            if let Some(pos) =
-                                                buf.windows(4).position(|w| w == b"\r\n\r\n")
-                                            {
+                                            let pos = buf.windows(4).position(|w| w == b"\r\n\r\n");
+                                            if let Some(pos) = pos {
                                                 header_len = Some(pos + 4);
                                                 let h_str = String::from_utf8_lossy(&buf[..pos]);
                                                 for line in h_str.lines() {
-                                                    if let Some((k, v)) = line.split_once(':') {
-                                                        if k.trim()
-                                                            .eq_ignore_ascii_case("content-length")
-                                                        {
-                                                            content_length =
-                                                                v.trim().parse::<usize>().ok();
-                                                        }
+                                                    let Some((k, v)) = line.split_once(':') else {
+                                                        continue;
+                                                    };
+                                                    if k.trim()
+                                                        .eq_ignore_ascii_case("content-length")
+                                                    {
+                                                        content_length =
+                                                            v.trim().parse::<usize>().ok();
                                                     }
                                                 }
                                             }
                                         }
                                         if let (Some(hl), Some(cl)) = (header_len, content_length) {
-                                            if buf.len() >= hl + cl {
+                                            let total = hl + cl;
+                                            if buf.len() >= total {
                                                 break;
                                             }
                                         }
@@ -841,7 +833,8 @@ mod tests {
             let mut env = Env::default();
             env.vars
                 .insert("TOA_GATEWAY_URL".into(), format!("http://{}", server.addr));
-            env.vars.insert("TOA_HOOK_TOKEN".into(), "test-token".into());
+            env.vars
+                .insert("TOA_HOOK_TOKEN".into(), "test-token".into());
 
             let req = CommandApprovalRequest {
                 id: "cmd-req-1".into(),
@@ -889,7 +882,8 @@ mod tests {
             let mut env = Env::default();
             env.vars
                 .insert("TOA_GATEWAY_URL".into(), format!("http://{}", server.addr));
-            env.vars.insert("TOA_HOOK_TOKEN".into(), "test-token".into());
+            env.vars
+                .insert("TOA_HOOK_TOKEN".into(), "test-token".into());
 
             let req = PathApprovalRequest {
                 id: "path-req-1".into(),
@@ -915,7 +909,8 @@ mod tests {
         let mut env = Env::default();
         env.vars
             .insert("TOA_GATEWAY_URL".into(), format!("http://{}", server.addr));
-        env.vars.insert("TOA_HOOK_TOKEN".into(), "test-token".into());
+        env.vars
+            .insert("TOA_HOOK_TOKEN".into(), "test-token".into());
         env.vars.insert("TOA_TERMINAL_ID".into(), "term-42".into());
 
         let cmd_req = CommandApprovalRequest {
@@ -1029,8 +1024,10 @@ mod tests {
         // 2. HTTP 503 Service Unavailable
         let server_503 = MockServer::start(503, r#"{"error":"service unavailable"}"#);
         let mut env = Env::default();
-        env.vars
-            .insert("TOA_GATEWAY_URL".into(), format!("http://{}", server_503.addr));
+        env.vars.insert(
+            "TOA_GATEWAY_URL".into(),
+            format!("http://{}", server_503.addr),
+        );
         env.vars.insert("TOA_HOOK_TOKEN".into(), "tok".into());
         let outcome = with_test_env(env, || resolve_approval(&["toa", "ask"], &req));
         assert_eq!(outcome, None);
@@ -1038,8 +1035,10 @@ mod tests {
         // 3. HTTP 200 with fallback: true
         let server_fb = MockServer::start(200, r#"{"fallback":true}"#);
         let mut env = Env::default();
-        env.vars
-            .insert("TOA_GATEWAY_URL".into(), format!("http://{}", server_fb.addr));
+        env.vars.insert(
+            "TOA_GATEWAY_URL".into(),
+            format!("http://{}", server_fb.addr),
+        );
         env.vars.insert("TOA_HOOK_TOKEN".into(), "tok".into());
         let outcome = with_test_env(env, || resolve_approval(&["toa", "ask"], &req));
         assert_eq!(outcome, None);
@@ -1056,8 +1055,10 @@ mod tests {
         .unwrap();
 
         let mut env = Env::default();
-        env.vars
-            .insert("TOA_API_DISCOVERY".into(), runtime_file.to_string_lossy().into());
+        env.vars.insert(
+            "TOA_API_DISCOVERY".into(),
+            runtime_file.to_string_lossy().into(),
+        );
 
         let disco = with_test_env(env, || discover_toa(None));
         assert!(disco.is_some());

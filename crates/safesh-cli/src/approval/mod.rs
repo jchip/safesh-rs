@@ -8,8 +8,8 @@ mod files;
 mod gui;
 pub mod once;
 mod proc;
-pub mod toa;
 mod tmux;
+pub mod toa;
 pub mod ui;
 
 #[allow(unused_imports)]

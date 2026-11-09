@@ -245,19 +245,13 @@ mod tests {
             KNOWN_APPROVAL_CHANNELS.contains(&"toa"),
             "KNOWN_APPROVAL_CHANNELS should include 'toa'"
         );
-        assert_eq!(
-            KNOWN_APPROVAL_CHANNELS,
-            &["toa", "ask", "tmux", "gui"]
-        );
+        assert_eq!(KNOWN_APPROVAL_CHANNELS, &["toa", "ask", "tmux", "gui"]);
     }
 
     #[test]
     fn approval_config_resolved_defaults_include_toa() {
         let resolved = ApprovalConfig::resolved(None);
-        assert_eq!(
-            resolved.channels,
-            vec!["toa", "ask", "tmux", "gui"]
-        );
+        assert_eq!(resolved.channels, vec!["toa", "ask", "tmux", "gui"]);
     }
 
     #[test]
@@ -273,10 +267,7 @@ mod tests {
             runtime_timeout_sec: Some(15),
         };
         let resolved = ApprovalConfig::resolved(Some(&cfg));
-        assert_eq!(
-            resolved.channels,
-            vec!["toa", "tmux", "gui", "ask"]
-        );
+        assert_eq!(resolved.channels, vec!["toa", "tmux", "gui", "ask"]);
         assert_eq!(resolved.timeout, Duration::from_secs(30));
         assert_eq!(resolved.runtime_timeout, Duration::from_secs(15));
     }
