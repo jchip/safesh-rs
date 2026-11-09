@@ -188,29 +188,29 @@ pub fn command_choices() -> Vec<ApprovalChoice> {
             access_modes: None,
         },
         ApprovalChoice {
-            id: "allow_session".into(),
-            label: "Allow for session".into(),
+            id: "allow_project".into(),
+            label: "Always allow (this project)".into(),
             hotkey: "2".into(),
             requires_access_mode: None,
             access_modes: None,
         },
         ApprovalChoice {
-            id: "allow_project".into(),
-            label: "Always allow (this project)".into(),
+            id: "allow_session".into(),
+            label: "Allow for session".into(),
             hotkey: "3".into(),
-            requires_access_mode: None,
-            access_modes: None,
-        },
-        ApprovalChoice {
-            id: "allow_global".into(),
-            label: "Always allow (all projects)".into(),
-            hotkey: "4".into(),
             requires_access_mode: None,
             access_modes: None,
         },
         ApprovalChoice {
             id: "deny".into(),
             label: "Deny".into(),
+            hotkey: "4".into(),
+            requires_access_mode: None,
+            access_modes: None,
+        },
+        ApprovalChoice {
+            id: "allow_global".into(),
+            label: "Always allow (all projects)".into(),
             hotkey: "5".into(),
             requires_access_mode: None,
             access_modes: None,
@@ -952,13 +952,13 @@ mod tests {
             assert_eq!(choices.len(), 5);
             assert_eq!(choices[0]["id"], "allow_once");
             assert_eq!(choices[0]["hotkey"], "1");
-            assert_eq!(choices[1]["id"], "allow_session");
+            assert_eq!(choices[1]["id"], "allow_project");
             assert_eq!(choices[1]["hotkey"], "2");
-            assert_eq!(choices[2]["id"], "allow_project");
+            assert_eq!(choices[2]["id"], "allow_session");
             assert_eq!(choices[2]["hotkey"], "3");
-            assert_eq!(choices[3]["id"], "allow_global");
+            assert_eq!(choices[3]["id"], "deny");
             assert_eq!(choices[3]["hotkey"], "4");
-            assert_eq!(choices[4]["id"], "deny");
+            assert_eq!(choices[4]["id"], "allow_global");
             assert_eq!(choices[4]["hotkey"], "5");
         }
 
