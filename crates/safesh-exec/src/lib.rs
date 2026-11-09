@@ -123,26 +123,66 @@ fn abort(message: &str) -> io::Error {
     let _ = writeln!(err, "{message}");
     let _ = err.flush();
     // A nested shell's denial must stop every safesh above it, not just this child.
-    // SPIKE(windows): no SIGUSR1; parents keep running. Needs TerminateProcess on Windows.
-    #[cfg(unix)]
-    for pid in parent_pids() {
-        let _ = rustix::process::kill_process(pid, rustix::process::Signal::USR1);
-    }
+    stop_parents();
     std::process::exit(i32::from(DENIED_STATUS));
 }
 
-#[cfg(unix)]
-fn parent_pids() -> Vec<rustix::process::Pid> {
+/// Pids of the safesh processes above this one, outermost first.
+#[cfg(any(unix, windows))]
+fn parent_pids() -> Vec<u32> {
     std::env::var(ENV_PARENT_PIDS)
         .unwrap_or_default()
         .split(':')
-        .filter_map(|p| p.parse::<i32>().ok())
-        .filter_map(rustix::process::Pid::from_raw)
+        .filter_map(|p| p.parse::<u32>().ok())
+        .filter(|&p| p > 0)
         .collect()
 }
 
+/// Unix: SIGUSR1 to each parent, whose handler exits it with status 126 (see `exit_on_child_denial`).
+#[cfg(unix)]
+fn stop_parents() {
+    for pid in parent_pids() {
+        let Some(pid) = i32::try_from(pid).ok().and_then(rustix::process::Pid::from_raw) else {
+            continue;
+        };
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::USR1);
+    }
+}
+
+/// Windows has no signal a process can catch, so each parent is terminated with status 126.
+/// Outermost first, and each kill waits until that process is gone: a parent never sees its
+/// child exit while a safesh above it still runs, so no later command of any script can start.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn stop_parents() {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    };
+    /// Bound on each wait, so a parent stuck in the kernel can't hang the denial.
+    const WAIT_MS: u32 = 2000;
+    for pid in parent_pids() {
+        // SAFETY: plain Win32 calls with no pointers. The handle is checked for null, used only
+        // here, and closed once.
+        unsafe {
+            let handle = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
+            if handle.is_null() {
+                continue;
+            }
+            if TerminateProcess(handle, u32::from(DENIED_STATUS)) != 0 {
+                WaitForSingleObject(handle, WAIT_MS);
+            }
+            CloseHandle(handle);
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn stop_parents() {}
+
 /// SIGUSR1 from a denied nested shell exits this process with status 126 right in the signal
-/// handler, so no later command of this script can run first.
+/// handler, so no later command of this script can run first. Windows needs no setup: the child
+/// terminates this process directly.
 #[cfg(not(unix))]
 fn exit_on_child_denial() {}
 

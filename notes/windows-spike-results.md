@@ -21,7 +21,7 @@ WSL2 was not tested. The WSL Rust is 1.88, and the workspace needs 1.89 (`File::
 | `safesh-hooks/src/approval.rs`, `safesh-cli/src/approval/{files,once}.rs` | `.mode(0o600/0o700)`, `Permissions::from_mode` | `safesh_policy::compat::fs`: `.mode()` is a no-op |
 | `safesh-cli/src/approval/files.rs` | `test_kill_process` for queue-ticket liveness | `compat::pid_alive` returns true for any pid > 0 |
 | `safesh-cli/src/approval/mod.rs` | exec bit in `find_bin` | any file counts |
-| `safesh-exec/src/lib.rs` | SIGUSR1 to parent safesh pids | none: no propagation |
+| `safesh-exec/src/lib.rs` | SIGUSR1 to parent safesh pids | none at first; item 3 now terminates them |
 
 The vendored brush-core, with the `check_open` patch, compiled with no changes. The shims are about 50 lines plus `compat.rs`. macOS still builds, clippy is clean, and all 695 tests pass.
 
@@ -43,7 +43,7 @@ Tests: the 20 lib and bin unit tests pass on Windows. Eight integration-test fil
 
 1. **Exe matching.** *(Fixed, see section 5.)* `is_resolved_allowed_name` (`policy.rs:355`) compares the basename `ls.exe` with the rule `ls`. Strip the PATHEXT extension and compare case-insensitively. This is the item in `design.md` section 7.
 2. **MSYS paths.** *(Fixed, see section 5.)* Git Bash hands safesh `/c/...`, `/tmp` (which is `%LOCALAPPDATA%\Temp`), `/usr/bin` (which is `C:\Program Files\Git\usr\bin`) and `HOME=/c/Users/...`. Policy needs one translation step, `cygpath` rules or the mount table, before `normalize_lexical`. Without it, `~` and every absolute path are wrong. This is the biggest piece.
-3. **Nested denial.** A denied `bash -c` exits 126, and the outer script keeps going. Replace SIGUSR1 with `OpenProcess` plus `TerminateProcess(pid, 126)` on `SAFESH_PARENT_PIDS`.
+3. **Nested denial.** *(Fixed, see section 6; not yet run on Windows.)* A denied `bash -c` exits 126, and the outer script keeps going. Replace SIGUSR1 with `OpenProcess` plus `TerminateProcess(pid, 126)` on `SAFESH_PARENT_PIDS`.
 4. **State-dir protection.** With no mode bits, approval and once-grant files inherit the parent's ACL. The deny-write list still guards them from the agent's shell, but other local users are not kept out. That needs an owner-only DACL.
 5. **Scratchpad trust.** Claude Code's Windows scratchpad layout and ownership check are unknown. Trust is off for now, which fails closed.
 6. **Approval channels.** tmux and GUI are Unix-only. Windows needs its own channel, such as a `MessageBox` or a Windows Terminal pane.
@@ -91,4 +91,12 @@ Still open:
 - A path command spelled `/usr/bin/ls` isn't mapped. brush resolves it outside `absolute_path`.
 - Globs over Git Bash paths (`/c/Users/*`) were not tried.
 - **Allow rules bypass resolution, on every platform.** When an argv `allow` rule matches by basename, `check_exec` skips `check_run`. So `/any/dir/git status` passes a `git status` allow rule. Confirmed on macOS. Windows extension stripping widens the match a little, so `git.cmd` matches too.
-- Items 3 to 7 above.
+- Items 4 to 7 above.
+
+## 6. Item 3 fixed
+
+A denied nested shell now stops every safesh above it on Windows too. `stop_parents` in `safesh-exec` reads `SAFESH_PARENT_PIDS` and, for each pid outermost first, calls `OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE)`, `TerminateProcess(pid, 126)`, then `WaitForSingleObject` with a 2 s bound. The wait matters: `TerminateProcess` returns before the target is gone, and a parent must not see its child exit while a safesh above it still runs. Unix is unchanged: SIGUSR1, and the parent's handler exits 126.
+
+This is the only `unsafe` in the workspace. `safesh-exec` copies the workspace lint table with `unsafe_code = "deny"` instead of `forbid`, and the one `cfg(windows)` function has `#[allow(unsafe_code)]`. `windows-sys` 0.61 (already in the lock) is a Windows-only dependency.
+
+Verified: macOS tests pass (707), clippy is clean on macOS and for `aarch64-pc-windows-msvc`. **Not run on Windows yet.** To check on Legion: `bash -c "notepad.exe"; echo after` should print no `after` and exit 126, and so should `sh s.sh; echo after` with a denied command in `s.sh`.
