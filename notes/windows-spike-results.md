@@ -20,7 +20,7 @@ WSL2 was not tested. The WSL Rust is 1.88, and the workspace needs 1.89 (`File::
 | `safesh-policy/src/scratchpad.rs` | `MetadataExt::uid` | `owns_claude_dir` returned false at first; item 5 checks the dir owner's SID |
 | `safesh-hooks/src/approval.rs`, `safesh-cli/src/approval/{files,once}.rs` | `.mode(0o600/0o700)`, `Permissions::from_mode` | `safesh_policy::compat::fs`: `.mode()` is a no-op; item 4 adds an owner-only DACL on the dirs |
 | `safesh-cli/src/approval/files.rs` | `test_kill_process` for queue-ticket liveness | `compat::pid_alive` returns true for any pid > 0 |
-| `safesh-cli/src/approval/mod.rs` | exec bit in `find_bin` | any file counts |
+| `safesh-cli/src/approval/mod.rs` | exec bit in `find_bin` | any file counts; on Windows the only bin dir is the system PowerShell dir (item 6) |
 | `safesh-exec/src/lib.rs` | SIGUSR1 to parent safesh pids | none at first; item 3 now terminates them |
 
 The vendored brush-core, with the `check_open` patch, compiled with no changes. The shims are about 50 lines plus `compat.rs`. macOS still builds, clippy is clean, and all 695 tests pass.
@@ -46,7 +46,7 @@ Tests: the 20 lib and bin unit tests pass on Windows. Eight integration-test fil
 3. **Nested denial.** *(Fixed, see section 6.)* A denied `bash -c` exits 126, and the outer script keeps going. Replace SIGUSR1 with `OpenProcess` plus `TerminateProcess(pid, 126)` on `SAFESH_PARENT_PIDS`.
 4. **State-dir protection.** *(Fixed, see section 7.)* With no mode bits, approval and once-grant files inherit the parent's ACL. The deny-write list still guards them from the agent's shell, but other local users are not kept out. That needs an owner-only DACL.
 5. **Scratchpad trust.** *(Fixed, see section 8.)* Claude Code's Windows scratchpad layout and ownership check are unknown. Trust is off for now, which fails closed.
-6. **Approval channels.** tmux and GUI are Unix-only. Windows needs its own channel, such as a `MessageBox` or a Windows Terminal pane.
+6. **Approval channels.** *(Fixed, see section 9.)* tmux and GUI are Unix-only. Windows needs its own channel, such as a `MessageBox` or a Windows Terminal pane.
 7. **Tests.** Port the integration tests behind `cfg(unix)`, or give them Windows equivalents, and add a `windows-latest` CI job.
 
 ## 4. Not tried
@@ -92,7 +92,7 @@ Still open:
 - **`#!` scripts don't start.** brush launches programs directly, and Windows has no shebang support, so `./run.sh` or `$PAD/run.sh` fails with `failed to execute command` (rc 126) after the gate allows it. Git Bash itself runs them through MSYS. Running scripts needs brush to read the `#!` line and launch the interpreter.
 - Globs over Git Bash paths (`/c/Users/*`) were not tried.
 - **Allow rules bypass resolution, on every platform.** When an argv `allow` rule matches by basename, `check_exec` skips `check_run`. So `/any/dir/git status` passes a `git status` allow rule. Confirmed on macOS. Windows extension stripping widens the match a little, so `git.cmd` matches too.
-- Items 6 and 7 above.
+- Item 7 above.
 
 ## 6. Item 3 fixed
 
@@ -151,4 +151,27 @@ Verified on Legion in Git Bash, through `hook claude` then `run`, no user config
 The test uses a copy of `whoami.exe`, because `#!` scripts don't start under brush on Windows (see "Still open"). Unit tests on Windows: the owner check accepts a fresh temp dir and rejects a file, a missing path and a junction. All 11 `safesh-policy` lib tests pass. macOS: all 710 tests pass, and clippy is clean on macOS and for `aarch64-pc-windows-msvc`.
 
 Not tested: a root owned by another non-admin user. Making one needs a second account to create it.
+
+## 9. Item 6 fixed
+
+The `gui` channel now works on Windows: a Windows Forms dialog run by Windows PowerShell 5.1. It is the same channel name, so the default order `ask`, `tmux`, `gui` picks it up. Its design matches `osascript` and `zenity`: an external process with a fixed script, where agent text is only ever data.
+
+- **Dialog:** a fixed title "safesh", the request title in bold, the body (commands or path, and cwd) in a read-only text box, one radio button per choice with Deny preselected, then OK and Cancel. OK prints the picked label. Cancel, Esc and the close box print `false`, which is Deny, as on macOS. At the deadline `proc::run` kills `powershell.exe`, and the dialog goes with it.
+- **Script:** fixed, sent with `-EncodedCommand` (base64 of UTF-16LE), with `-NoProfile -NonInteractive`. The title, body, labels and default index arrive in `SAFESH_DIALOG_*` env vars. The script calls .NET directly and uses no cmdlets, so nothing autoloads from `PSModulePath`; a unit test checks for Verb-Noun names.
+- **Env:** the child starts with an empty env plus `SystemRoot`, `windir` and the dialog data. At runtime the env comes from the agent's shell, which could set `PSModulePath`, `COR_ENABLE_PROFILING`/`COR_PROFILER_PATH` and the like.
+- **Binary:** `powershell.exe` is looked up only in `<system dir>\WindowsPowerShell\v1.0`. The system dir comes from `GetSystemDirectoryW` (`compat::system_dir`), not `SystemRoot` or `PATH`. `CREATE_NO_WINDOW` keeps a console from flashing up.
+- **When it is offered:** `SESSIONNAME` set (`Console`, or `RDP-Tcp#N`) and no `SSH_CONNECTION`, `SSH_CLIENT` or `SSH_TTY`. Explorer gets `SESSIONNAME` from `HKCU\Volatile Environment\<session>`, so a Claude Code started from the desktop has it. SSH sessions, services and scheduled tasks don't, and there a dialog would be invisible. They fall back to the text menu.
+
+Verified on Legion, in the logged-on console session, through a scheduled task (`/IT`) running `safesh approve-ask --channels gui`, which grants nothing. The task sets `SESSIONNAME=Console`, because tasks don't get it, and sets a bogus `PSModulePath`. The dialog was driven with `BM_CLICK`. UI Automation reports every Windows Forms control as a Pane here, so its patterns don't apply.
+
+| Case | Result |
+|---|---|
+| dialog appears | within 0.6 to 3.4 s, all five labels, Deny preselected (window capture) |
+| select `3. Allow for session`, click OK | `Session`, 1 s |
+| click Cancel | `Deny`, 1 s |
+| no answer, `--show-sec 6` | `none` at 6 s, no dialog process left |
+
+Unit tests, all platforms: base64 vectors, hostile text reaching the child only through env with exactly six env vars set, no cmdlets in the script, and availability (desktop session yes; no `SESSIONNAME`, any SSH var, no PowerShell or no Windows dir: no). macOS: all 715 tests pass, and clippy is clean on macOS and for `aarch64-pc-windows-msvc`.
+
+Not tested: a real Claude Code hook prompt through the dialog. The hook calls the same `ask_user` as `approve-ask`, and Claude Code on Legion isn't logged in.
 

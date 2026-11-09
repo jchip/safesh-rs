@@ -1,4 +1,5 @@
-//! Ask the user directly for an approval: tmux popup or desktop dialog.
+//! Ask the user directly for an approval: tmux popup or desktop dialog (osascript, zenity or
+//! kdialog, or a Windows Forms dialog run by `powershell.exe` on Windows).
 //!
 //! A channel either returns the user's choice or `None`. `None` means the caller falls back to
 //! the text menu. It never means allow.
@@ -160,11 +161,15 @@ fn clip(s: &str) -> String {
 pub struct Env {
     pub vars: HashMap<String, String>,
     pub macos: bool,
+    pub windows: bool,
+    /// Windows dir (`C:\Windows`), from Win32. The dialog child gets it as `SystemRoot`.
+    pub win_root: Option<PathBuf>,
     /// Path to this safesh binary, for the tmux popup.
     pub exe: PathBuf,
     pub state_dir: PathBuf,
-    /// Where `tmux`, `osascript`, `zenity` and `kdialog` are looked up. Never `$PATH`: at
-    /// runtime the env comes from the agent's shell, which could put a fake dialog first.
+    /// Where `tmux`, `osascript`, `zenity`, `kdialog` and `powershell.exe` are looked up. Never
+    /// `$PATH`: at runtime the env comes from the agent's shell, which could put a fake dialog
+    /// first. On Windows it is `System32\WindowsPowerShell\v1.0`, with the system dir from Win32.
     pub bin_dirs: Vec<PathBuf>,
 }
 
@@ -176,9 +181,13 @@ impl Env {
         "DISPLAY",
         "WAYLAND_DISPLAY",
         "SSH_CONNECTION",
+        "SSH_CLIENT",
         "SSH_TTY",
+        // Windows: `Console` or `RDP-Tcp#N` in a desktop session; unset over SSH and in services.
+        "SESSIONNAME",
     ];
 
+    #[cfg(not(windows))]
     const BIN_DIRS: &[&str] = &["/usr/bin", "/bin", "/opt/homebrew/bin", "/usr/local/bin"];
 
     #[must_use]
@@ -192,9 +201,16 @@ impl Env {
                     .map(|v| ((*k).to_string(), v))
             })
             .collect();
+        #[cfg(windows)]
+        let win_root =
+            safesh_policy::compat::system_dir().and_then(|d| d.parent().map(Path::to_path_buf));
+        #[cfg(not(windows))]
+        let win_root = None;
         Self {
             vars,
             macos: cfg!(target_os = "macos"),
+            windows: cfg!(windows),
+            win_root,
             exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("safesh")),
             state_dir: state_dir.to_path_buf(),
             bin_dirs: Self::bin_dirs(),
@@ -207,6 +223,12 @@ impl Env {
         if let Some(d) = std::env::var_os("SAFESH_TEST_BIN_DIRS") {
             return std::env::split_paths(&d).collect();
         }
+        #[cfg(windows)]
+        return safesh_policy::compat::system_dir()
+            .map(|d| d.join("WindowsPowerShell").join("v1.0"))
+            .into_iter()
+            .collect();
+        #[cfg(not(windows))]
         Self::BIN_DIRS.iter().map(PathBuf::from).collect()
     }
 
@@ -218,7 +240,7 @@ impl Env {
         self.bin_dirs.iter().map(|d| d.join(name)).find(|p| {
             #[cfg(unix)]
             let exec = |m: &std::fs::Metadata| m.permissions().mode() & 0o111 != 0;
-            // SPIKE(windows): no exec bit; any file counts.
+            // Windows has no exec bit; the name carries `.exe`.
             #[cfg(not(unix))]
             let exec = |_: &std::fs::Metadata| true;
             p.metadata().is_ok_and(|m| m.is_file() && exec(&m))
@@ -231,7 +253,9 @@ impl Env {
     }
 
     fn over_ssh(&self) -> bool {
-        self.var("SSH_CONNECTION").is_some() || self.var("SSH_TTY").is_some()
+        ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"]
+            .iter()
+            .any(|k| self.var(k).is_some())
     }
 }
 

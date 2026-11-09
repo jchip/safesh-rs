@@ -70,6 +70,14 @@ pub fn dir_owned_by_user_or_admins(path: &Path) -> bool {
         && win::owned_by_user_or_admins(path)
 }
 
+/// Windows: the system dir (`C:\Windows\System32`), from Win32 rather than `SystemRoot`, which
+/// the agent's shell can set.
+#[cfg(windows)]
+#[must_use]
+pub fn system_dir() -> Option<std::path::PathBuf> {
+    win::system_dir()
+}
+
 /// Whether a process with this pid exists. EPERM counts as alive.
 #[must_use]
 pub fn pid_alive(pid: i32) -> bool {
@@ -118,6 +126,7 @@ mod win {
         TokenUser, WinBuiltinAdministratorsSid, WinLocalSystemSid,
     };
     use windows_sys::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
+    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
     use windows_sys::Win32::System::Threading::{
         GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
         TerminateProcess, WaitForSingleObject,
@@ -173,6 +182,18 @@ mod win {
             }
             Ok(buf)
         }
+    }
+
+    pub(super) fn system_dir() -> Option<std::path::PathBuf> {
+        use std::os::windows::ffi::OsStringExt as _;
+        let mut buf = vec![0u16; 512];
+        let cap = u32::try_from(buf.len()).ok()?;
+        // SAFETY: the buffer holds `cap` u16s, and the call writes at most that many.
+        let n = unsafe { GetSystemDirectoryW(buf.as_mut_ptr(), cap) } as usize;
+        if n == 0 || n >= buf.len() {
+            return None;
+        }
+        Some(std::ffi::OsString::from_wide(&buf[..n]).into())
     }
 
     fn wide(path: &Path) -> Vec<u16> {

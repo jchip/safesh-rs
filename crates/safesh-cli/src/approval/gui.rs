@@ -1,6 +1,8 @@
-//! Desktop dialog channel: `osascript` on macOS, `zenity` or `kdialog` on Linux.
+//! Desktop dialog channel: `osascript` on macOS, `zenity` or `kdialog` on Linux, and a Windows
+//! Forms dialog run by `powershell.exe` on Windows.
 //!
-//! Prompt text and labels reach the dialog only as argv items, never as script source.
+//! Prompt text and labels reach the dialog only as argv items (env vars on Windows), never as
+//! script source.
 
 use std::path::Path;
 use std::process::Command;
@@ -12,6 +14,13 @@ pub struct Gui;
 
 impl Channel for Gui {
     fn available(&self, env: &Env) -> bool {
+        if env.windows {
+            // Over SSH or in a service there is no desktop to show the dialog on.
+            return !env.over_ssh()
+                && env.var("SESSIONNAME").is_some()
+                && env.win_root.is_some()
+                && env.find_bin("powershell.exe").is_some();
+        }
         if tmux_client_over_ssh(env) {
             return false;
         }
@@ -23,6 +32,14 @@ impl Channel for Gui {
     }
 
     fn ask(&self, env: &Env, prompt: &Prompt, deadline: Instant) -> Option<Choice> {
+        if env.windows {
+            let ps = env.find_bin("powershell.exe")?;
+            let out = proc::run(windows_cmd(&ps, env.win_root.as_deref()?, prompt), deadline)?;
+            return match out.trim() {
+                "false" => Some(Choice::Deny),
+                s => choice_from_label(&prompt.request, s),
+            };
+        }
         if env.macos {
             let out = proc::run(osascript_cmd(&env.find_bin("osascript")?, prompt), deadline)?;
             return match out.trim() {
@@ -120,6 +137,264 @@ fn kdialog_cmd(kdialog: &Path, prompt: &Prompt) -> Command {
             .arg(if i == deny { "on" } else { "off" });
     }
     cmd
+}
+
+/// The Windows dialog. Fixed: everything it shows comes from `SAFESH_DIALOG_*` env vars. It calls
+/// .NET directly and no cmdlets, so no module is autoloaded from `PSModulePath`. OK prints the
+/// picked label. Cancel, Esc and the close box print `false`, which is Deny, as on macOS.
+const WINDOWS_SCRIPT: &str = r"$ErrorActionPreference = 'Stop'
+[void][Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+[void][Reflection.Assembly]::LoadWithPartialName('System.Drawing')
+[Windows.Forms.Application]::EnableVisualStyles()
+$labels = $env:SAFESH_DIALOG_LABELS.Split([char]10)
+$default = [int]$env:SAFESH_DIALOG_DEFAULT
+$form = [Windows.Forms.Form]::new()
+$form.Text = 'safesh'
+$form.TopMost = $true
+$form.StartPosition = 'CenterScreen'
+$form.FormBorderStyle = 'FixedDialog'
+$form.MinimizeBox = $false
+$form.MaximizeBox = $false
+$form.AutoSize = $true
+$form.AutoSizeMode = 'GrowAndShrink'
+$panel = [Windows.Forms.FlowLayoutPanel]::new()
+$panel.FlowDirection = 'TopDown'
+$panel.WrapContents = $false
+$panel.AutoSize = $true
+$panel.Padding = [Windows.Forms.Padding]::new(12)
+$title = [Windows.Forms.Label]::new()
+$title.Text = $env:SAFESH_DIALOG_TITLE
+$title.AutoSize = $true
+$title.Font = [Drawing.Font]::new($title.Font, [Drawing.FontStyle]::Bold)
+$panel.Controls.Add($title)
+$body = [Windows.Forms.TextBox]::new()
+$body.Multiline = $true
+$body.ReadOnly = $true
+$body.WordWrap = $false
+$body.ScrollBars = 'Both'
+$body.Font = [Drawing.Font]::new('Consolas', 9)
+$body.Width = 680
+$body.Height = 170
+$body.Text = $env:SAFESH_DIALOG_TEXT.Replace([string][char]10, [string][char]13 + [char]10)
+$panel.Controls.Add($body)
+$radios = [Collections.Generic.List[Windows.Forms.RadioButton]]::new()
+for ($i = 0; $i -lt $labels.Length; $i++) {
+    $r = [Windows.Forms.RadioButton]::new()
+    $r.Text = $labels[$i]
+    $r.AutoSize = $true
+    $r.Checked = ($i -eq $default)
+    $panel.Controls.Add($r)
+    $radios.Add($r)
+}
+$buttons = [Windows.Forms.FlowLayoutPanel]::new()
+$buttons.AutoSize = $true
+$ok = [Windows.Forms.Button]::new()
+$ok.Text = 'OK'
+$ok.DialogResult = [Windows.Forms.DialogResult]::OK
+$cancel = [Windows.Forms.Button]::new()
+$cancel.Text = 'Cancel'
+$cancel.DialogResult = [Windows.Forms.DialogResult]::Cancel
+$buttons.Controls.Add($ok)
+$buttons.Controls.Add($cancel)
+$panel.Controls.Add($buttons)
+$form.Controls.Add($panel)
+$form.AcceptButton = $ok
+$form.CancelButton = $cancel
+$form.Add_Shown({ $form.Activate(); $ok.Focus() })
+$result = $form.ShowDialog()
+$picked = 'false'
+if ($result -eq [Windows.Forms.DialogResult]::OK) {
+    foreach ($r in $radios) { if ($r.Checked) { $picked = $r.Text } }
+}
+[Console]::Out.Write($picked)
+";
+
+/// `powershell.exe` with an empty env plus `SystemRoot`, `windir` and the dialog's data. The
+/// agent's shell may have set `PSModulePath`, `COR_PROFILER` and the like, so nothing from the
+/// calling env reaches the child.
+fn windows_cmd(powershell: &Path, win_root: &Path, prompt: &Prompt) -> Command {
+    let mut cmd = Command::new(powershell);
+    cmd.env_clear()
+        .env("SystemRoot", win_root)
+        .env("windir", win_root)
+        .env("SAFESH_DIALOG_TITLE", prompt.request.title())
+        .env("SAFESH_DIALOG_TEXT", body_lines(prompt).join("\n"))
+        .env(
+            "SAFESH_DIALOG_LABELS",
+            numbered_labels(&prompt.request).join("\n"),
+        )
+        .env("SAFESH_DIALOG_DEFAULT", deny_index(prompt).to_string())
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-EncodedCommand",
+        ])
+        .arg(encode_command(WINDOWS_SCRIPT));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        /// `CREATE_NO_WINDOW`: no console window flashes up behind the dialog.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// `-EncodedCommand` form: base64 of the UTF-16LE script.
+fn encode_command(script: &str) -> String {
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64(&bytes)
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(char::from(ABC[(n >> (18 - 6 * i)) as usize & 63]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod windows_tests {
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    use super::super::Request;
+    use super::*;
+
+    fn prompt(c: &str) -> Prompt {
+        Prompt {
+            id: "p1".into(),
+            cwd: r"C:\work".into(),
+            request: Request::Command {
+                commands: vec![c.into()],
+            },
+        }
+    }
+
+    fn envs(c: &Command) -> HashMap<String, String> {
+        c.get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect()
+    }
+
+    #[test]
+    fn base64_vectors() {
+        for (i, o) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(i.as_bytes()), o);
+        }
+        assert_eq!(encode_command("a"), "YQA=");
+    }
+
+    #[test]
+    fn hostile_text_reaches_the_dialog_only_as_env() {
+        let evil = "'; Remove-Item -Recurse ~ ; $(calc) `\"x";
+        let p = prompt(evil);
+        let c = windows_cmd(Path::new(r"C:\W\ps.exe"), Path::new(r"C:\W"), &p);
+        let args: Vec<String> = c
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args[..4],
+            [
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand"
+            ]
+        );
+        assert_eq!(args.len(), 5);
+        assert_eq!(args[4], encode_command(WINDOWS_SCRIPT));
+        assert!(!WINDOWS_SCRIPT.contains("Remove-Item"));
+        let e = envs(&c);
+        assert!(e["SAFESH_DIALOG_TEXT"].contains("Remove-Item"));
+        assert_eq!(e["SAFESH_DIALOG_TITLE"], p.request.title());
+        assert_eq!(
+            e["SAFESH_DIALOG_LABELS"],
+            numbered_labels(&p.request).join("\n")
+        );
+        assert_eq!(e["SAFESH_DIALOG_DEFAULT"], deny_index(&p).to_string());
+        assert_eq!(e["SystemRoot"], r"C:\W");
+        let mut keys: Vec<&str> = e.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "SAFESH_DIALOG_DEFAULT",
+                "SAFESH_DIALOG_LABELS",
+                "SAFESH_DIALOG_TEXT",
+                "SAFESH_DIALOG_TITLE",
+                "SystemRoot",
+                "windir"
+            ]
+        );
+    }
+
+    #[test]
+    fn script_uses_no_cmdlets() {
+        // A cmdlet would autoload its module from `PSModulePath`. Verb-Noun names are cmdlets.
+        let verbs = [
+            "Add-", "New-", "Write-", "Get-", "Set-", "Out-", "Where-", "ForEach-", "Select-",
+            "Import-",
+        ];
+        for v in verbs {
+            assert!(!WINDOWS_SCRIPT.contains(v), "{v}");
+        }
+    }
+
+    #[test]
+    fn available_on_windows_desktop_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let ps = dir.path().join("powershell.exe");
+        std::fs::write(&ps, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let env = |vars: &[(&str, &str)], root: bool| Env {
+            vars: vars
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect(),
+            windows: true,
+            win_root: root.then(|| r"C:\Windows".into()),
+            bin_dirs: vec![dir.path().to_path_buf()],
+            ..Env::default()
+        };
+        assert!(Gui.available(&env(&[("SESSIONNAME", "Console")], true)));
+        assert!(Gui.available(&env(&[("SESSIONNAME", "RDP-Tcp#3")], true)));
+        assert!(!Gui.available(&env(&[], true)));
+        assert!(!Gui.available(&env(&[("SESSIONNAME", "Console")], false)));
+        for ssh in ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"] {
+            assert!(
+                !Gui.available(&env(&[("SESSIONNAME", "Console"), (ssh, "x")], true)),
+                "{ssh}"
+            );
+        }
+        let mut no_ps = env(&[("SESSIONNAME", "Console")], true);
+        no_ps.bin_dirs = vec![];
+        assert!(!Gui.available(&no_ps));
+    }
 }
 
 #[cfg(all(test, unix))]
