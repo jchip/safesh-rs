@@ -43,7 +43,7 @@ Tests: the 20 lib and bin unit tests pass on Windows. Eight integration-test fil
 
 1. **Exe matching.** *(Fixed, see section 5.)* `is_resolved_allowed_name` (`policy.rs:355`) compares the basename `ls.exe` with the rule `ls`. Strip the PATHEXT extension and compare case-insensitively. This is the item in `design.md` section 7.
 2. **MSYS paths.** *(Fixed, see section 5.)* Git Bash hands safesh `/c/...`, `/tmp` (which is `%LOCALAPPDATA%\Temp`), `/usr/bin` (which is `C:\Program Files\Git\usr\bin`) and `HOME=/c/Users/...`. Policy needs one translation step, `cygpath` rules or the mount table, before `normalize_lexical`. Without it, `~` and every absolute path are wrong. This is the biggest piece.
-3. **Nested denial.** *(Fixed, see section 6; not yet run on Windows.)* A denied `bash -c` exits 126, and the outer script keeps going. Replace SIGUSR1 with `OpenProcess` plus `TerminateProcess(pid, 126)` on `SAFESH_PARENT_PIDS`.
+3. **Nested denial.** *(Fixed, see section 6.)* A denied `bash -c` exits 126, and the outer script keeps going. Replace SIGUSR1 with `OpenProcess` plus `TerminateProcess(pid, 126)` on `SAFESH_PARENT_PIDS`.
 4. **State-dir protection.** With no mode bits, approval and once-grant files inherit the parent's ACL. The deny-write list still guards them from the agent's shell, but other local users are not kept out. That needs an owner-only DACL.
 5. **Scratchpad trust.** Claude Code's Windows scratchpad layout and ownership check are unknown. Trust is off for now, which fails closed.
 6. **Approval channels.** tmux and GUI are Unix-only. Windows needs its own channel, such as a `MessageBox` or a Windows Terminal pane.
@@ -99,4 +99,15 @@ A denied nested shell now stops every safesh above it on Windows too. `stop_pare
 
 This is the only `unsafe` in the workspace. `safesh-exec` copies the workspace lint table with `unsafe_code = "deny"` instead of `forbid`, and the one `cfg(windows)` function has `#[allow(unsafe_code)]`. `windows-sys` 0.61 (already in the lock) is a Windows-only dependency.
 
-Verified: macOS tests pass (707), clippy is clean on macOS and for `aarch64-pc-windows-msvc`. **Not run on Windows yet.** To check on Legion: `bash -c "notepad.exe"; echo after` should print no `after` and exit 126, and so should `sh s.sh; echo after` with a denied command in `s.sh`.
+Verified: macOS tests pass (707), clippy is clean on macOS and for `aarch64-pc-windows-msvc`.
+
+Verified on Legion in Git Bash, through `hook claude` then `run`, release build of `4c71290`. The denied command is spelled `n=notepad; $n.exe`, so the outer safesh can't see it statically and the denial comes from the nested shell. The baseline is the build before this fix.
+
+| Case | Fixed | Baseline |
+|---|---|---|
+| `bash -c 'echo nested-start; n=notepad; $n.exe; echo nested-after'; echo after` | rc 126, `nested-start` | rc 0, `nested-start`, `after` |
+| `sh s.sh; echo after` (`s.sh` runs the denied command) | rc 126, `s-start` | rc 0, `s-start`, `after` |
+| `bash outer.sh; echo after`, where `outer.sh` runs the denying `bash -c` and then `echo o-after` (two levels) | rc 126, `o-start`, `i-start` | rc 0, `o-start`, `i-start`, `o-after`, `after` |
+| `bash -c "echo nested-ok"; echo after` (control) | rc 0, `nested-ok`, `after` | same |
+
+In no case did notepad start.
