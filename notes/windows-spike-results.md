@@ -197,5 +197,7 @@ The whole test suite now builds and passes on Windows, and CI has a `windows-lat
 
 **CI:** a new `windows` job on `windows-latest` with `shell: bash` (Git Bash). It runs clippy with `-D warnings` on the lint job's pinned 1.95.0, then `cargo test`, a release build, the same `safesh check 'ls | wc -l'` smoke test (checked on Legion), and uploads a zip. It has not run yet, because the branch isn't pushed. Clippy 1.95 may report lints that 1.94.1 on Legion does not.
 
+**Found by the first CI run:** `allow_rule_does_not_follow_a_path_the_script_changed` assumed `PATH='<bin>':"$PATH"` puts the fake first. Under brush on Windows `$PATH` is the native `;` list, so the `:` merged `<bin>` with the next entry, and the real `git` ran (the fake never did, so nothing was let through). It passed on Legion only because the hook asked there, which skipped the assertions. The test now uses the platform separator and a `git.exe` fake. It also checks for `[SAFESH]` in stderr, since a failed exec is 126 too. Checked by hand on Legion: with `;` the gate blocks `<bin>\git.exe` with 126. That `:` doesn't work in `PATH` is a Windows gap, now listed in the README.
+
 **Coverage still missing on Windows:** the tmux and hook-approval e2e flows (Unix fakes), `#!` script execution, and the symlink cases.
 

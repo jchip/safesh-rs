@@ -29,6 +29,7 @@ safesh only sees what its own shell runs. A Python script deleting files, or `ma
   - Arguments to native Windows programs are not converted. Git Bash turns `/c/x` into `C:\x` for programs like `git.exe`; safesh does not, so policy checks `C:\x` while the program reads `C:\c\x`. Use Windows paths (`C:/x`) in arguments to native programs.
   - `#!` scripts do not start, because Windows has no shebang support. Run them as `bash script.sh`.
   - A command run by its Git Bash path (`/usr/bin/ls`, `/tmp/x/tool.exe`) is not mapped at runtime and is blocked.
+  - `$PATH` inside a script is the native `;`-separated list, not Git Bash's `:` form, so `PATH=/x/bin:$PATH` does not put `/x/bin` first. Use `PATH="C:/x/bin;$PATH"`.
   - Stale approval-queue tickets are not cleaned up.
   - Not yet tried in a real Claude Code session on Windows.
 

@@ -139,13 +139,23 @@ fn allow_rule_does_not_follow_a_path_the_script_changed() {
     // session's PATH finds.
     let e = Env::new();
     let bin = e.outside.join("bin");
-    fake_tool(&bin, "git");
+    // Windows finds a PATH program only with a `PATHEXT` extension, so the fake must be
+    // `git.exe` to come first. It is a `#!` script and can't start, which is fine: the gate must
+    // stop it before exec.
+    fake_tool(&bin, if cfg!(windows) { "git.exe" } else { "git" });
     e.write_global_config(r#"{"rules":[{"match":["git","status"],"action":"allow"}]}"#);
-    let script = format!("PATH='{}':\"$PATH\"; git status; echo after", bin.display());
+    // Under brush on Windows `$PATH` is the native `;` list, not Git Bash's `:` form.
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    let script = format!(
+        "PATH=\"{}{sep}$PATH\"; git status; echo after",
+        sh_word(&bin)
+    );
     let h = e.hook(&script);
     if h.decision() == "allow" {
         let r = e.sh(&h.command());
         assert_eq!(r.code, 126, "stdout={} stderr={}", r.stdout, r.stderr);
+        // A failed exec is 126 too; the denial must come from the gate.
+        assert!(r.stderr.contains("[SAFESH]"), "{}", r.stderr);
         assert!(!r.stdout.contains("RAN git"), "fake ran: {}", r.stdout);
     }
 }
