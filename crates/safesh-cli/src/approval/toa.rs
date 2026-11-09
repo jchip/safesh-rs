@@ -780,13 +780,13 @@ impl Channel for ToaChannel {
             .max(1);
 
         match &prompt.request {
-            Request::Command { commands } => {
+            Request::Command { commands, command } => {
                 let req = CommandApprovalRequest {
                     id: prompt.id.clone(),
                     cli: None,
                     session_id: None,
                     cwd: prompt.cwd.clone(),
-                    command: commands.join(" && "),
+                    command: command.clone().unwrap_or_else(|| commands.join(" && ")),
                     reason: None,
                     rule_name: None,
                     timeout_secs,
@@ -1354,6 +1354,7 @@ mod tests {
             cwd: "/home/user".into(),
             request: Request::Command {
                 commands: vec!["cargo build".into()],
+                command: None,
             },
         };
 

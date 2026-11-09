@@ -280,6 +280,7 @@ mod windows_tests {
             cwd: r"C:\work".into(),
             request: Request::Command {
                 commands: vec![c.into()],
+                command: None,
             },
         }
     }
@@ -412,6 +413,7 @@ mod tests {
             cwd: "/work".into(),
             request: Request::Command {
                 commands: vec![c.into()],
+                command: None,
             },
         }
     }

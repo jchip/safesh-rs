@@ -134,6 +134,22 @@ mod tests {
     }
 
     #[test]
+    fn command_screen_shows_full_command() {
+        let p = Prompt {
+            id: "p1".into(),
+            cwd: "/Users/me/dev/proj".into(),
+            request: Request::Command {
+                commands: vec!["node".into()],
+                command: Some("node scripts/build.js --prod".into()),
+            },
+        };
+        let s = screen(&p);
+        assert_eq!(s[0], "  node");
+        assert_eq!(s[1], "  command: node scripts/build.js --prod");
+        assert_eq!(s[3], "  in /Users/me/dev/proj");
+    }
+
+    #[test]
     fn parse_range() {
         assert_eq!(parse(" 1\n", 5), Some(0));
         assert_eq!(parse("5", 5), Some(4));

@@ -217,7 +217,7 @@ fn answered(
     let host = &ctx.host;
     delete_pending(host, &ask.pending_id, ask.kind);
     let what = match &ask.request {
-        Request::Command { commands } => commands.join(", "),
+        Request::Command { commands, .. } => commands.join(", "),
         Request::Path { path, .. } => path.clone(),
     };
     let scope = match choice {
@@ -237,7 +237,7 @@ fn answered(
         ..OnceGrant::default()
     };
     let saved = match &ask.request {
-        Request::Command { commands } => {
+        Request::Command { commands, .. } => {
             grant.commands.clone_from(commands);
             save_command_grant(
                 host,
@@ -399,7 +399,10 @@ fn block(ctx: &Context, ev: &Evaluation, id: &str, input: &HookInput) -> Blocked
             ask: Some(Ask {
                 pending_id: pending.id,
                 kind: PendingKind::Command,
-                request: Request::Command { commands },
+                request: Request::Command {
+                    commands,
+                    command: Some(input.command.clone()),
+                },
             }),
         },
         Err(e) => Blocked::text(messages::denied(&commands.join(", "), &[e.to_string()])),

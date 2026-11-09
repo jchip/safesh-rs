@@ -170,7 +170,10 @@ fn main() -> ExitCode {
                     },
                     command: commands.into_iter().next(),
                 },
-                None => approval::Request::Command { commands },
+                None => approval::Request::Command {
+                    commands,
+                    command: None,
+                },
             };
             let timing = approval::Timing {
                 show: std::time::Duration::from_secs(show_sec),

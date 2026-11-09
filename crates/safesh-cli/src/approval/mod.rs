@@ -30,7 +30,11 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum Request {
     Command {
+        /// Command names to grant.
         commands: Vec<String>,
+        /// The agent's full command line, shown for context.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
     },
     Path {
         path: String,
@@ -131,7 +135,11 @@ const MAX_LINES: usize = 8;
 #[must_use]
 pub fn body_lines(prompt: &Prompt) -> Vec<String> {
     let items: Vec<String> = match &prompt.request {
-        Request::Command { commands } => commands.clone(),
+        Request::Command { commands, command } => {
+            let mut v = commands.clone();
+            v.extend(command.iter().map(|c| format!("command: {c}")));
+            v
+        }
         Request::Path { path, command, .. } => {
             let mut v = vec![format!("path: {path}")];
             v.extend(command.iter().map(|c| format!("command: {c}")));
