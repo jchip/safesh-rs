@@ -1819,7 +1819,6 @@ dependencies = [
  "signal-hook",
  "thiserror",
  "tokio",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1851,6 +1850,7 @@ dependencies = [
  "sys_traits",
  "tempfile",
  "thiserror",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

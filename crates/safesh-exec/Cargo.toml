@@ -5,17 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# The workspace lints, except `unsafe_code` is `deny` rather than `forbid`: the Windows parent kill
-# in `stop_parents` needs Win32 FFI and opts in with `#[allow(unsafe_code)]`. Keep in sync with
-# `[workspace.lints]`.
-[lints.rust]
-unsafe_code = "deny"
-
-[lints.clippy]
-all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-module_name_repetitions = "allow"
-missing_errors_doc = "allow"
+[lints]
+workspace = true
 
 [dependencies]
 brush-core.workspace = true
@@ -26,5 +17,3 @@ tokio.workspace = true
 rustix.workspace = true
 signal-hook.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }

@@ -7,8 +7,6 @@ use safesh_policy::compat::fs::{DirBuilderExt, OpenOptionsExt};
 use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -29,9 +27,7 @@ fn ensure_dir(dir: &Path) -> std::io::Result<()> {
         .recursive(true)
         .mode(0o700)
         .create(dir)?;
-    #[cfg(unix)]
-    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
-    Ok(())
+    safesh_policy::compat::restrict_dir(dir)
 }
 
 /// This process's place in the prompt queue. Dropping it leaves the queue.
@@ -46,6 +42,9 @@ impl Queue {
     /// if `give_up_at` passes first.
     pub fn wait_turn(state_dir: &Path, id: &str, give_up_at: Instant) -> Option<Self> {
         check_id(id).ok()?;
+        // `approvals-ui` first: on Windows only the dirs passed to `ensure_dir` are restricted,
+        // and the lock file lives there.
+        ensure_dir(&ui_dir(state_dir)).ok()?;
         let dir = ui_dir(state_dir).join("queue");
         ensure_dir(&dir).ok()?;
         let nanos = SystemTime::now()

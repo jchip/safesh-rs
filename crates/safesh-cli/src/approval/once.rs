@@ -58,6 +58,7 @@ pub fn write(state_dir: &Path, pending_id: &str, grant: &OnceGrant) -> Result<()
         .mode(0o700)
         .create(&d)
         .map_err(|e| e.to_string())?;
+    safesh_policy::compat::restrict_dir(&d).map_err(|e| format!("{}: {e}", d.display()))?;
     let mut g = grant.clone();
     g.created_ms = now_ms();
     let body = serde_json::to_vec(&g).map_err(|e| e.to_string())?;

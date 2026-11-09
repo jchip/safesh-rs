@@ -153,27 +153,11 @@ fn stop_parents() {
 /// Outermost first, and each kill waits until that process is gone: a parent never sees its
 /// child exit while a safesh above it still runs, so no later command of any script can start.
 #[cfg(windows)]
-#[allow(unsafe_code)]
 fn stop_parents() {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
-    };
     /// Bound on each wait, so a parent stuck in the kernel can't hang the denial.
     const WAIT_MS: u32 = 2000;
     for pid in parent_pids() {
-        // SAFETY: plain Win32 calls with no pointers. The handle is checked for null, used only
-        // here, and closed once.
-        unsafe {
-            let handle = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
-            if handle.is_null() {
-                continue;
-            }
-            if TerminateProcess(handle, u32::from(DENIED_STATUS)) != 0 {
-                WaitForSingleObject(handle, WAIT_MS);
-            }
-            CloseHandle(handle);
-        }
+        safesh_policy::compat::terminate_and_wait(pid, u32::from(DENIED_STATUS), WAIT_MS);
     }
 }
 

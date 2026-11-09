@@ -3,11 +3,10 @@
 #[cfg(unix)]
 use fs_err::os::unix::fs::OpenOptionsExt;
 use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use safesh_policy::compat::fs::DirBuilderExt;
 use safesh_policy::host::HostEnv;
 use serde::{Deserialize, Serialize};
 
@@ -44,14 +43,11 @@ pub enum ApprovalError {
 
 fn dir(host: &HostEnv) -> Result<PathBuf, ApprovalError> {
     let d = host.state_dir.join("approvals");
-    let mut b = std::fs::DirBuilder::new();
-    b.recursive(true);
-    #[cfg(unix)]
-    b.mode(0o700);
-    b.create(&d)?;
-    // SPIKE(windows): no mode bits; the dir inherits the parent's ACL.
-    #[cfg(unix)]
-    fs_err::set_permissions(&d, std::fs::Permissions::from_mode(0o700))?;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&d)?;
+    safesh_policy::compat::restrict_dir(&d)?;
     Ok(d)
 }
 
@@ -119,6 +115,7 @@ pub fn write_approval(
     let path = d.join(format!("approval-{}.json", unique()));
     let mut o = fs_err::OpenOptions::new();
     o.write(true).create_new(true);
+    // Windows: the record inherits the dir's owner-only DACL.
     #[cfg(unix)]
     o.mode(0o600);
     let mut f = o.open(path)?;
