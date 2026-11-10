@@ -527,11 +527,11 @@ pub fn send_command_request(
 
     let decision = val.get("decision").and_then(|d| d.as_str())?;
     match decision {
-        "allow_once" => Some(ApprovalOutcome::AllowOnce),
-        "allow_session" => Some(ApprovalOutcome::AllowSession),
-        "allow_project" => Some(ApprovalOutcome::AllowProject),
-        "allow_global" => Some(ApprovalOutcome::AllowGlobal),
-        "deny" => Some(ApprovalOutcome::Deny),
+        "allow_once" | "1" => Some(ApprovalOutcome::AllowOnce),
+        "allow_session" | "3" => Some(ApprovalOutcome::AllowSession),
+        "allow_project" | "2" => Some(ApprovalOutcome::AllowProject),
+        "allow_global" | "5" => Some(ApprovalOutcome::AllowGlobal),
+        "deny" | "4" => Some(ApprovalOutcome::Deny),
         _ => None,
     }
 }
@@ -572,20 +572,63 @@ pub fn send_path_request(
     let decision = val.get("decision").and_then(|d| d.as_str())?;
     let access_str = val
         .get("access")
-        .and_then(|a| a.as_str())
-        .unwrap_or(&req.access_needed);
-    let access = match access_str {
-        "read" => PathAccessMode::Read,
-        "write" => PathAccessMode::Write,
-        _ => PathAccessMode::ReadWrite,
-    };
+        .or_else(|| val.get("accessMode"))
+        .and_then(|a| a.as_str());
 
-    match decision {
-        "allow_once" => Some(PathApprovalOutcome::AllowOnce { access }),
-        "allow_session" => Some(PathApprovalOutcome::AllowSession { access }),
-        "allow_project" => Some(PathApprovalOutcome::AllowProject { access }),
-        "deny" => Some(PathApprovalOutcome::Deny),
+    let (norm_decision, decision_access) = parse_path_decision(decision);
+    let explicit_access = access_str.and_then(parse_path_access_str);
+    let default_access = parse_path_access_str(&req.access_needed).unwrap_or(PathAccessMode::ReadWrite);
+
+    let access = explicit_access
+        .or(decision_access)
+        .unwrap_or(default_access);
+
+    match norm_decision {
+        "allow_once" | "1" => Some(PathApprovalOutcome::AllowOnce { access }),
+        "allow_session" | "2" => Some(PathApprovalOutcome::AllowSession { access }),
+        "allow_project" | "3" => Some(PathApprovalOutcome::AllowProject { access }),
+        "deny" | "4" => Some(PathApprovalOutcome::Deny),
         _ => None,
+    }
+}
+
+fn parse_path_access_str(s: &str) -> Option<PathAccessMode> {
+    match s.trim().to_lowercase().as_str() {
+        "read" | "r" | "ro" => Some(PathAccessMode::Read),
+        "write" | "w" => Some(PathAccessMode::Write),
+        "read_write" | "rw" => Some(PathAccessMode::ReadWrite),
+        _ => None,
+    }
+}
+
+fn parse_path_decision(decision: &str) -> (&str, Option<PathAccessMode>) {
+    let lower = decision.trim().to_lowercase();
+    if let Some(rest) = lower.strip_prefix("rw") {
+        if matches!(rest, "1" | "2" | "3") {
+            return (scope_num_to_decision(rest), Some(PathAccessMode::ReadWrite));
+        }
+    } else if let Some(rest) = lower.strip_prefix("ro") {
+        if matches!(rest, "1" | "2" | "3") {
+            return (scope_num_to_decision(rest), Some(PathAccessMode::Read));
+        }
+    } else if let Some(rest) = lower.strip_prefix('r') {
+        if matches!(rest, "1" | "2" | "3") {
+            return (scope_num_to_decision(rest), Some(PathAccessMode::Read));
+        }
+    } else if let Some(rest) = lower.strip_prefix('w') {
+        if matches!(rest, "1" | "2" | "3") {
+            return (scope_num_to_decision(rest), Some(PathAccessMode::Write));
+        }
+    }
+    (decision, None)
+}
+
+fn scope_num_to_decision(num: &str) -> &'static str {
+    match num {
+        "1" => "allow_once",
+        "2" => "allow_session",
+        "3" => "allow_project",
+        _ => "allow_once",
     }
 }
 
@@ -862,6 +905,12 @@ mod tests {
                 },
             ),
             (
+                r#"{"decision":"allow_once","accessMode":"ro"}"#,
+                PathApprovalOutcome::AllowOnce {
+                    access: PathAccessMode::Read,
+                },
+            ),
+            (
                 r#"{"decision":"allow_session","access":"write"}"#,
                 PathApprovalOutcome::AllowSession {
                     access: PathAccessMode::Write,
@@ -871,6 +920,18 @@ mod tests {
                 r#"{"decision":"allow_project","access":"read_write"}"#,
                 PathApprovalOutcome::AllowProject {
                     access: PathAccessMode::ReadWrite,
+                },
+            ),
+            (
+                r#"{"decision":"rw3","accessMode":"rw"}"#,
+                PathApprovalOutcome::AllowProject {
+                    access: PathAccessMode::ReadWrite,
+                },
+            ),
+            (
+                r#"{"decision":"w2"}"#,
+                PathApprovalOutcome::AllowSession {
+                    access: PathAccessMode::Write,
                 },
             ),
             (r#"{"decision":"deny"}"#, PathApprovalOutcome::Deny),
