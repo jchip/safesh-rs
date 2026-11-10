@@ -42,6 +42,20 @@ fn default_budget(agent: Agent) -> u64 {
 }
 
 pub fn run(agent: Agent, shadow: bool, budget_sec: Option<u64>) -> u8 {
+    fail_closed(shadow, || run_inner(agent, shadow, budget_sec))
+}
+
+/// Runs the hook body so that a panic cannot let the tool call through. A process that dies
+/// from a panic exits 101, which agents treat as "hook errored, carry on": the command would
+/// run unchecked. Exit 2 blocks it instead. Shadow mode never blocks, so it passes through.
+fn fail_closed(shadow: bool, body: impl FnOnce() -> u8 + std::panic::UnwindSafe) -> u8 {
+    std::panic::catch_unwind(body).unwrap_or_else(|_| {
+        eprintln!("safesh hook: internal error (panic); blocking the command");
+        if shadow { 0 } else { 2 }
+    })
+}
+
+fn run_inner(agent: Agent, shadow: bool, budget_sec: Option<u64>) -> u8 {
     let mut stdin = String::new();
     if let Err(e) = std::io::stdin().read_to_string(&mut stdin) {
         eprintln!("safesh hook: cannot read stdin: {e}");
@@ -445,5 +459,18 @@ mod tests {
     fn quoting() {
         assert_eq!(sh_quote("a b"), "'a b'");
         assert_eq!(sh_quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn a_panic_in_the_hook_blocks_the_command() {
+        // Keep the expected panic out of the test output.
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let blocked = super::fail_closed(false, || panic!("boom"));
+        let shadow = super::fail_closed(true, || panic!("boom"));
+        std::panic::set_hook(prev);
+        assert_eq!(blocked, 2);
+        assert_eq!(shadow, 0);
+        assert_eq!(super::fail_closed(false, || 0), 0);
     }
 }
