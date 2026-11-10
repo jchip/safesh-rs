@@ -331,30 +331,31 @@ pub fn ask_with(
     if env.var("SAFESH_APPROVAL") == Some("off") {
         return None;
     }
-    let deadline = (Instant::now() + timing.show).min(timing.give_up_at);
-
-    // 1. Try non-modal channels first (e.g. TOA) without acquiring the modal desktop lock.
-    // This allows multiple agents and terminals to queue approval requests concurrently in TOA.
-    let mut modal_channels = Vec::new();
+    // Channels are asked in the configured order. Modal channels (desktop dialog, tmux popup)
+    // collide when two are on screen, so the first one reached takes this machine's prompt
+    // queue and holds it for the rest of the call. Non-modal channels (TOA) queue centrally
+    // and never take it, so several agents can have requests pending there at once.
+    let mut turn: Option<files::Queue> = None;
+    let mut modal_deadline: Option<Instant> = None;
     for ch in channels.iter().filter(|c| c.available(env)) {
-        if !ch.is_modal() {
-            if let Some(choice) = ch.ask(env, prompt, deadline) {
-                return Some(choice);
+        let deadline = if ch.is_modal() {
+            if turn.is_none() {
+                turn = Some(files::Queue::wait_turn(
+                    &env.state_dir,
+                    &prompt.id,
+                    timing.give_up_at,
+                )?);
             }
+            // Modal channels share one window, counted from when the turn was won.
+            *modal_deadline
+                .get_or_insert_with(|| (Instant::now() + timing.show).min(timing.give_up_at))
         } else {
-            modal_channels.push(ch);
+            (Instant::now() + timing.show).min(timing.give_up_at)
+        };
+        if Instant::now() >= timing.give_up_at {
+            return None;
         }
-    }
-
-    if modal_channels.is_empty() {
-        return None;
-    }
-
-    // 2. For modal channels (tmux, gui), serialize prompt display via the local file queue.
-    let _turn = files::Queue::wait_turn(&env.state_dir, &prompt.id, timing.give_up_at)?;
-    let modal_deadline = (Instant::now() + timing.show).min(timing.give_up_at);
-    for ch in modal_channels {
-        if let Some(choice) = ch.ask(env, prompt, modal_deadline) {
+        if let Some(choice) = ch.ask(env, prompt, deadline) {
             return Some(choice);
         }
     }
@@ -387,4 +388,96 @@ pub fn cli_ask(
         None => println!("none"),
     }
     0
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    struct Fake {
+        name: &'static str,
+        modal: bool,
+        answer: Option<Choice>,
+        log: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Channel for Fake {
+        fn available(&self, _: &Env) -> bool {
+            true
+        }
+        fn is_modal(&self) -> bool {
+            self.modal
+        }
+        fn ask(&self, env: &Env, prompt: &Prompt, _: Instant) -> Option<Choice> {
+            // A ticket in the queue dir means this call holds the machine-wide prompt turn.
+            let holds_turn = std::fs::read_dir(files::ui_dir(&env.state_dir).join("queue"))
+                .is_ok_and(|d| {
+                    d.flatten()
+                        .any(|e| e.file_name().to_string_lossy().ends_with(&prompt.id))
+                });
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("{} turn={holds_turn}", self.name));
+            self.answer
+        }
+    }
+
+    fn run(order: &[(&'static str, bool, Option<Choice>)]) -> (Option<Choice>, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Env {
+            state_dir: dir.path().to_path_buf(),
+            ..Env::default()
+        };
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let channels: Vec<Box<dyn Channel>> = order
+            .iter()
+            .map(|&(name, modal, answer)| {
+                Box::new(Fake {
+                    name,
+                    modal,
+                    answer,
+                    log: Arc::clone(&log),
+                }) as Box<dyn Channel>
+            })
+            .collect();
+        let prompt = Prompt {
+            id: "order-1".into(),
+            cwd: "/".into(),
+            request: Request::Command {
+                commands: vec!["ls".into()],
+                command: None,
+            },
+        };
+        let timing = Timing {
+            show: Duration::from_secs(5),
+            give_up_at: Instant::now() + Duration::from_secs(10),
+        };
+        let choice = ask_with(&channels, &env, &prompt, timing);
+        let log = log.lock().unwrap().clone();
+        (choice, log)
+    }
+
+    #[test]
+    fn channels_are_asked_in_configured_order() {
+        let (choice, log) = run(&[("tmux", true, None), ("toa", false, Some(Choice::Once))]);
+        assert_eq!(choice, Some(Choice::Once));
+        assert_eq!(log, ["tmux turn=true", "toa turn=true"]);
+
+        let (choice, log) = run(&[("toa", false, None), ("gui", true, Some(Choice::Deny))]);
+        assert_eq!(choice, Some(Choice::Deny));
+        // The non-modal channel runs without the machine-wide prompt queue.
+        assert_eq!(log, ["toa turn=false", "gui turn=true"]);
+    }
+
+    #[test]
+    fn first_answer_wins_and_later_channels_are_not_asked() {
+        let (choice, log) = run(&[
+            ("toa", false, Some(Choice::Session)),
+            ("gui", true, Some(Choice::Deny)),
+        ]);
+        assert_eq!(choice, Some(Choice::Session));
+        assert_eq!(log, ["toa turn=false"]);
+    }
 }

@@ -170,13 +170,30 @@ impl PathApprovalOutcome {
     }
 }
 
-impl From<PathApprovalOutcome> for Choice {
-    fn from(outcome: PathApprovalOutcome) -> Self {
-        match outcome {
-            PathApprovalOutcome::AllowOnce { .. } => Choice::Once,
-            PathApprovalOutcome::AllowSession { .. } => Choice::Session,
-            PathApprovalOutcome::AllowProject { .. } => Choice::Project,
-            PathApprovalOutcome::Deny => Choice::Deny,
+impl PathAccessMode {
+    /// Whether a grant of this mode permits `op`.
+    #[must_use]
+    pub fn covers(self, op: PathOperation) -> bool {
+        match op {
+            PathOperation::Read => matches!(self, Self::Read | Self::ReadWrite),
+            PathOperation::Write => matches!(self, Self::Write | Self::ReadWrite),
+        }
+    }
+}
+
+impl PathApprovalOutcome {
+    /// The channel choice for a request that needs `op`.
+    ///
+    /// A `Choice` carries no access mode and the hook grants the requested operation, so an
+    /// answer whose access does not cover `op` (read-only picked for a write) must not turn
+    /// into an allow: it is a denial of what was asked.
+    #[must_use]
+    pub fn into_choice(self, op: PathOperation) -> Choice {
+        match self {
+            Self::AllowOnce { access } if access.covers(op) => Choice::Once,
+            Self::AllowSession { access } if access.covers(op) => Choice::Session,
+            Self::AllowProject { access } if access.covers(op) => Choice::Project,
+            _ => Choice::Deny,
         }
     }
 }
@@ -223,28 +240,36 @@ pub fn command_choices() -> Vec<ApprovalChoice> {
 }
 
 /// Choices offered for path approvals (1..4 with access modes on allow).
-pub fn path_choices() -> Vec<ApprovalChoice> {
+pub fn path_choices(access_needed: &str) -> Vec<ApprovalChoice> {
+    // Only offer modes that satisfy the request: read-only cannot answer a write request.
+    let modes = || -> Option<Vec<String>> {
+        Some(match access_needed {
+            "read" => vec!["read".into(), "read_write".into()],
+            "write" => vec!["write".into(), "read_write".into()],
+            _ => vec!["read".into(), "write".into(), "read_write".into()],
+        })
+    };
     vec![
         ApprovalChoice {
             id: "allow_once".into(),
             label: "Allow once".into(),
             hotkey: "1".into(),
             requires_access_mode: Some(true),
-            access_modes: Some(vec!["read".into(), "write".into(), "read_write".into()]),
+            access_modes: modes(),
         },
         ApprovalChoice {
             id: "allow_session".into(),
             label: "Allow for session".into(),
             hotkey: "2".into(),
             requires_access_mode: Some(true),
-            access_modes: Some(vec!["read".into(), "write".into(), "read_write".into()]),
+            access_modes: modes(),
         },
         ApprovalChoice {
             id: "allow_project".into(),
             label: "Always allow (this project)".into(),
             hotkey: "3".into(),
             requires_access_mode: Some(true),
-            access_modes: Some(vec!["read".into(), "write".into(), "read_write".into()]),
+            access_modes: modes(),
         },
         ApprovalChoice {
             id: "deny".into(),
@@ -427,8 +452,9 @@ fn decode_chunked(data: &[u8]) -> Option<Vec<u8>> {
             return None;
         }
 
-        let chunk_end = chunk_start + chunk_size;
-        let chunk_with_crlf_end = chunk_end + 2;
+        // The size comes off the wire: never let it overflow or index past the buffer.
+        let chunk_end = chunk_start.checked_add(chunk_size)?;
+        let chunk_with_crlf_end = chunk_end.checked_add(2)?;
         if data.len() < chunk_with_crlf_end {
             return None;
         }
@@ -440,6 +466,15 @@ fn decode_chunked(data: &[u8]) -> Option<Vec<u8>> {
         cursor = chunk_with_crlf_end;
     }
 }
+
+/// How long the gateway is asked to hold the request. It is shorter than our own read timeout
+/// so the gateway always gives up first: otherwise both expire together and the gateway can
+/// record an answer as delivered after we stopped listening.
+fn server_hold_secs(timeout_secs: u64) -> u64 {
+    timeout_secs.saturating_sub(HOLD_MARGIN_SECS).max(1)
+}
+
+const HOLD_MARGIN_SECS: u64 = 2;
 
 /// Zero-dependency HTTP/1.1 client over `TcpStream`.
 fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u16, String)> {
@@ -572,7 +607,7 @@ pub fn send_command_request(
         access_needed: None,
         reason: req.reason.as_deref(),
         rule_name: req.rule_name.as_deref(),
-        timeout_secs: req.timeout_secs,
+        timeout_secs: server_hold_secs(req.timeout_secs),
         choices: command_choices(),
     };
 
@@ -616,8 +651,8 @@ pub fn send_path_request(
         access_needed: Some(&req.access_needed),
         reason: req.reason.as_deref(),
         rule_name: req.rule_name.as_deref(),
-        timeout_secs: req.timeout_secs,
-        choices: path_choices(),
+        timeout_secs: server_hold_secs(req.timeout_secs),
+        choices: path_choices(&req.access_needed),
     };
 
     let body = serde_json::to_string(&payload).ok()?;
@@ -643,8 +678,10 @@ pub fn send_path_request(
     let default_access =
         parse_path_access_str(&req.access_needed).unwrap_or(PathAccessMode::ReadWrite);
 
-    let access = explicit_access
-        .or(decision_access)
+    // A mode named in the decision itself (`r1`) is what the human picked; a separate field
+    // must not widen it.
+    let access = decision_access
+        .or(explicit_access)
         .unwrap_or(default_access);
 
     match norm_decision {
@@ -697,7 +734,6 @@ fn parse_path_decision(decision: &str) -> (&str, Option<PathAccessMode>) {
 
 fn scope_num_to_decision(num: &str) -> &'static str {
     match num {
-        "1" => "allow_once",
         "2" => "allow_session",
         "3" => "allow_project",
         _ => "allow_once",
@@ -776,7 +812,10 @@ impl Channel for ToaChannel {
         let disco = discover_toa(Some(env))?;
         let timeout_secs = deadline
             .saturating_duration_since(Instant::now())
-            .as_secs()
+            .as_millis()
+            .div_ceil(1000)
+            .try_into()
+            .unwrap_or(u64::MAX)
             .max(1);
 
         match &prompt.request {
@@ -786,7 +825,10 @@ impl Channel for ToaChannel {
                     cli: None,
                     session_id: None,
                     cwd: prompt.cwd.clone(),
-                    command: command.clone().unwrap_or_else(|| commands.join(" && ")),
+                    command: command
+                        .clone()
+                        .filter(|c| !c.trim().is_empty())
+                        .unwrap_or_else(|| commands.join(" && ")),
                     reason: None,
                     rule_name: None,
                     timeout_secs,
@@ -811,7 +853,7 @@ impl Channel for ToaChannel {
                     timeout_secs,
                 };
                 let outcome = send_path_request(&disco, &req)?;
-                Some(outcome.into())
+                Some(outcome.into_choice(*op))
             }
         }
     }
@@ -1401,6 +1443,7 @@ mod tests {
             cwd: "/tmp".into(),
             request: Request::Command {
                 commands: vec!["ls -la".into()],
+                command: None,
             },
         };
         let choice = with_test_env(env.clone(), || {
@@ -1415,5 +1458,141 @@ mod tests {
         // Non-modal channels (TOA) bypass the local modal UI lock (Queue::wait_turn)
         // so multiple agents/terminals can submit approvals simultaneously.
         assert!(!channel.is_modal());
+    }
+
+    fn path_prompt(op: PathOperation) -> Prompt {
+        Prompt {
+            id: "prompt-path".into(),
+            cwd: "/work".into(),
+            request: Request::Path {
+                path: "/etc/app.conf".into(),
+                op,
+                command: None,
+            },
+        }
+    }
+
+    fn toa_env(server: &MockServer) -> Env {
+        let mut env = Env::default();
+        env.vars
+            .insert("TOA_GATEWAY_URL".into(), format!("http://{}", server.addr));
+        env.vars.insert("TOA_HOOK_TOKEN".into(), "tok".into());
+        env
+    }
+
+    /// The hook grants the requested operation for any allow, so an answer that does not
+    /// cover that operation has to come out of the channel as a denial.
+    #[test]
+    fn read_only_answer_to_a_write_request_is_a_denial() {
+        for body in [
+            r#"{"decision":"r1"}"#,
+            r#"{"decision":"ro3"}"#,
+            r#"{"decision":"allow_once","access":"read"}"#,
+            r#"{"decision":"allow_project","accessMode":"read"}"#,
+            // A separate field must not widen what the decision itself says.
+            r#"{"decision":"r2","access":"read_write"}"#,
+        ] {
+            let server = MockServer::start(200, body);
+            let env = toa_env(&server);
+            let choice = ToaChannel.ask(
+                &env,
+                &path_prompt(PathOperation::Write),
+                Instant::now() + Duration::from_secs(5),
+            );
+            assert_eq!(choice, Some(Choice::Deny), "{body}");
+        }
+    }
+
+    #[test]
+    fn answers_that_cover_the_operation_are_allowed() {
+        for (op, body, want) in [
+            (
+                PathOperation::Write,
+                r#"{"decision":"rw3"}"#,
+                Choice::Project,
+            ),
+            (
+                PathOperation::Write,
+                r#"{"decision":"w2"}"#,
+                Choice::Session,
+            ),
+            (
+                PathOperation::Write,
+                r#"{"decision":"allow_once"}"#,
+                Choice::Once,
+            ),
+            (PathOperation::Read, r#"{"decision":"r1"}"#, Choice::Once),
+            (
+                PathOperation::Read,
+                r#"{"decision":"rw2"}"#,
+                Choice::Session,
+            ),
+            (PathOperation::Read, r#"{"decision":"deny"}"#, Choice::Deny),
+        ] {
+            let server = MockServer::start(200, body);
+            let env = toa_env(&server);
+            let choice = ToaChannel.ask(
+                &env,
+                &path_prompt(op),
+                Instant::now() + Duration::from_secs(5),
+            );
+            assert_eq!(choice, Some(want), "{op:?} {body}");
+        }
+        // Write-only does not let the agent read.
+        let server = MockServer::start(200, r#"{"decision":"w1"}"#);
+        let env = toa_env(&server);
+        let choice = ToaChannel.ask(
+            &env,
+            &path_prompt(PathOperation::Read),
+            Instant::now() + Duration::from_secs(5),
+        );
+        assert_eq!(choice, Some(Choice::Deny));
+    }
+
+    #[test]
+    fn path_request_offers_only_modes_that_satisfy_it() {
+        let server = MockServer::start(200, r#"{"decision":"deny"}"#);
+        let env = toa_env(&server);
+        let _ = ToaChannel.ask(
+            &env,
+            &path_prompt(PathOperation::Write),
+            Instant::now() + Duration::from_secs(10),
+        );
+        let reqs = server.requests.lock().unwrap();
+        let body = &reqs[0].1;
+        assert_eq!(body["accessNeeded"], "write");
+        let modes: Vec<&str> = body["choices"][0]["accessModes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        assert_eq!(modes, ["write", "read_write"]);
+        // The gateway is asked to give up before we do.
+        let hold = body["timeoutSecs"].as_u64().unwrap();
+        assert!((7..=8).contains(&hold), "hold {hold}");
+    }
+
+    #[test]
+    fn server_hold_is_shorter_than_the_read_timeout() {
+        assert_eq!(server_hold_secs(60), 58);
+        assert_eq!(server_hold_secs(3), 1);
+        assert_eq!(server_hold_secs(1), 1);
+        assert_eq!(server_hold_secs(0), 1);
+    }
+
+    #[test]
+    fn chunk_sizes_off_the_wire_never_panic() {
+        for raw in [
+            &b"ffffffffffffffff\r\nabc\r\n0\r\n\r\n"[..],
+            b"fffffffffffffffe\r\nabc\r\n0\r\n\r\n",
+            b"7fffffffffffffff\r\nabc\r\n0\r\n\r\n",
+            b"fffffffffffffffff\r\n",
+            b"5\r\nab",
+            b"zz\r\n",
+            b"",
+        ] {
+            assert_eq!(decode_chunked(raw), None, "{raw:?}");
+        }
     }
 }
