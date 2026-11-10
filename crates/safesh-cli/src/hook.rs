@@ -42,16 +42,27 @@ fn default_budget(agent: Agent) -> u64 {
 }
 
 pub fn run(agent: Agent, shadow: bool, budget_sec: Option<u64>) -> u8 {
-    fail_closed(shadow, || run_inner(agent, shadow, budget_sec))
+    fail_closed(agent, shadow, || run_inner(agent, shadow, budget_sec))
 }
 
 /// Runs the hook body so that a panic cannot let the tool call through. A process that dies
 /// from a panic exits 101, which agents treat as "hook errored, carry on": the command would
-/// run unchecked. Exit 2 blocks it instead. Shadow mode never blocks, so it passes through.
-fn fail_closed(shadow: bool, body: impl FnOnce() -> u8 + std::panic::UnwindSafe) -> u8 {
+/// run unchecked. On a panic the agent gets its own deny output (not every agent blocks on a
+/// bare exit code); if even that fails, exit 2. Shadow mode never blocks, so it passes through.
+fn fail_closed(
+    agent: Agent,
+    shadow: bool,
+    body: impl FnOnce() -> u8 + std::panic::UnwindSafe,
+) -> u8 {
     std::panic::catch_unwind(body).unwrap_or_else(|_| {
         eprintln!("safesh hook: internal error (panic); blocking the command");
-        if shadow { 0 } else { 2 }
+        if shadow {
+            return 0;
+        }
+        let deny = Outcome::Deny {
+            message: "[SAFESH] internal error in the hook; the command was blocked".to_string(),
+        };
+        std::panic::catch_unwind(|| emit(agent, None, &deny)).unwrap_or(2)
     })
 }
 
@@ -454,6 +465,7 @@ fn log_shadow(agent: Agent, input: &HookInput, outcome: &Outcome) {
 #[cfg(test)]
 mod tests {
     use super::sh_quote;
+    use safesh_hooks::{Agent, HookInput, Outcome, format_output};
 
     #[test]
     fn quoting() {
@@ -466,11 +478,19 @@ mod tests {
         // Keep the expected panic out of the test output.
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let blocked = super::fail_closed(false, || panic!("boom"));
-        let shadow = super::fail_closed(true, || panic!("boom"));
+        let claude = super::fail_closed(Agent::Claude, false, || panic!("boom"));
+        let agy = super::fail_closed(Agent::Agy, false, || panic!("boom"));
+        let shadow = super::fail_closed(Agent::Claude, true, || panic!("boom"));
         std::panic::set_hook(prev);
-        assert_eq!(blocked, 2);
+        // Each agent gets the exit code its own deny output uses.
+        let deny = Outcome::Deny {
+            message: String::new(),
+        };
+        let want =
+            |a| u8::try_from(format_output(a, &HookInput::default(), &deny).exit_code).unwrap();
+        assert_eq!(claude, want(Agent::Claude));
+        assert_eq!(agy, want(Agent::Agy));
         assert_eq!(shadow, 0);
-        assert_eq!(super::fail_closed(false, || 0), 0);
+        assert_eq!(super::fail_closed(Agent::Claude, false, || 0), 0);
     }
 }

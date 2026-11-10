@@ -338,23 +338,26 @@ pub fn ask_with(
     let mut turn: Option<files::Queue> = None;
     let mut modal_deadline: Option<Instant> = None;
     for ch in channels.iter().filter(|c| c.available(env)) {
+        if Instant::now() >= timing.give_up_at {
+            return None;
+        }
         let deadline = if ch.is_modal() {
             if turn.is_none() {
-                turn = Some(files::Queue::wait_turn(
-                    &env.state_dir,
-                    &prompt.id,
-                    timing.give_up_at,
-                )?);
+                turn = files::Queue::wait_turn(&env.state_dir, &prompt.id, timing.give_up_at);
+            }
+            if turn.is_none() {
+                // The prompt queue stayed busy. A later non-modal channel does not need it.
+                continue;
             }
             // Modal channels share one window, counted from when the turn was won.
             *modal_deadline
                 .get_or_insert_with(|| (Instant::now() + timing.show).min(timing.give_up_at))
         } else {
+            // Do not keep other prompts off the screen while a non-modal channel waits.
+            turn = None;
+            modal_deadline = None;
             (Instant::now() + timing.show).min(timing.give_up_at)
         };
-        if Instant::now() >= timing.give_up_at {
-            return None;
-        }
         if let Some(choice) = ch.ask(env, prompt, deadline) {
             return Some(choice);
         }
@@ -463,7 +466,8 @@ mod order_tests {
     fn channels_are_asked_in_configured_order() {
         let (choice, log) = run(&[("tmux", true, None), ("toa", false, Some(Choice::Once))]);
         assert_eq!(choice, Some(Choice::Once));
-        assert_eq!(log, ["tmux turn=true", "toa turn=true"]);
+        // The queue is released before the non-modal channel waits.
+        assert_eq!(log, ["tmux turn=true", "toa turn=false"]);
 
         let (choice, log) = run(&[("toa", false, None), ("gui", true, Some(Choice::Deny))]);
         assert_eq!(choice, Some(Choice::Deny));

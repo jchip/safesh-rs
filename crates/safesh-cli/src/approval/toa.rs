@@ -474,6 +474,12 @@ fn server_hold_secs(timeout_secs: u64) -> u64 {
     timeout_secs.saturating_sub(HOLD_MARGIN_SECS).max(1)
 }
 
+/// How long we wait for the gateway's reply: at least the hold plus the margin, so the gateway
+/// gives up first even when the budget is too small to take the margin out of the hold.
+fn read_timeout_secs(timeout_secs: u64) -> u64 {
+    timeout_secs.max(server_hold_secs(timeout_secs) + HOLD_MARGIN_SECS)
+}
+
 const HOLD_MARGIN_SECS: u64 = 2;
 
 /// Zero-dependency HTTP/1.1 client over `TcpStream`.
@@ -560,7 +566,8 @@ fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u
                             break;
                         }
                     } else if let Some(clen) = content_length {
-                        let total = hlen + clen;
+                        // The length comes off the wire: no overflow, no panic.
+                        let total = hlen.checked_add(clen)?;
                         if buf.len() >= total {
                             buf.truncate(total);
                             break;
@@ -581,7 +588,7 @@ fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u
         let decoded = decoded_chunked.or_else(|| decode_chunked(&buf[hlen..]))?;
         String::from_utf8(decoded).ok()?
     } else if let Some(clen) = content_length {
-        let end = (hlen + clen).min(buf.len());
+        let end = hlen.saturating_add(clen).min(buf.len());
         std::str::from_utf8(&buf[hlen..end]).ok()?.to_string()
     } else {
         std::str::from_utf8(&buf[hlen..]).ok()?.to_string()
@@ -613,7 +620,12 @@ pub fn send_command_request(
 
     let body = serde_json::to_string(&payload).ok()?;
     let endpoint = format!("{}/v1/approvals", disco.gateway_url.trim_end_matches('/'));
-    let (status, resp_body) = http_post(&endpoint, &disco.hook_token, &body, req.timeout_secs)?;
+    let (status, resp_body) = http_post(
+        &endpoint,
+        &disco.hook_token,
+        &body,
+        read_timeout_secs(req.timeout_secs),
+    )?;
     if status != 200 {
         return None;
     }
@@ -657,7 +669,12 @@ pub fn send_path_request(
 
     let body = serde_json::to_string(&payload).ok()?;
     let endpoint = format!("{}/v1/approvals", disco.gateway_url.trim_end_matches('/'));
-    let (status, resp_body) = http_post(&endpoint, &disco.hook_token, &body, req.timeout_secs)?;
+    let (status, resp_body) = http_post(
+        &endpoint,
+        &disco.hook_token,
+        &body,
+        read_timeout_secs(req.timeout_secs),
+    )?;
     if status != 200 {
         return None;
     }
@@ -668,13 +685,18 @@ pub fn send_path_request(
     }
 
     let decision = val.get("decision").and_then(|d| d.as_str())?;
-    let access_str = val
-        .get("access")
-        .or_else(|| val.get("accessMode"))
-        .and_then(|a| a.as_str());
+    // The first access field that carries a value. A null `access` does not hide `accessMode`.
+    let access_val = ["access", "accessMode"]
+        .iter()
+        .filter_map(|k| val.get(*k))
+        .find(|v| !v.is_null());
 
     let (norm_decision, decision_access) = parse_path_decision(decision);
-    let explicit_access = access_str.and_then(parse_path_access_str);
+    let explicit_access = match access_val {
+        None => None,
+        // An access we cannot read is not "whatever was asked": treat the answer as unusable.
+        Some(v) => Some(v.as_str().and_then(parse_path_access_str)?),
+    };
     let default_access =
         parse_path_access_str(&req.access_needed).unwrap_or(PathAccessMode::ReadWrite);
 
@@ -1577,8 +1599,12 @@ mod tests {
     fn server_hold_is_shorter_than_the_read_timeout() {
         assert_eq!(server_hold_secs(60), 58);
         assert_eq!(server_hold_secs(3), 1);
-        assert_eq!(server_hold_secs(1), 1);
-        assert_eq!(server_hold_secs(0), 1);
+        for budget in [0, 1, 2, 3, 4, 60, 588] {
+            assert!(
+                read_timeout_secs(budget) >= server_hold_secs(budget) + HOLD_MARGIN_SECS,
+                "budget {budget}"
+            );
+        }
     }
 
     #[test]
@@ -1594,5 +1620,58 @@ mod tests {
         ] {
             assert_eq!(decode_chunked(raw), None, "{raw:?}");
         }
+    }
+
+    #[test]
+    fn content_length_off_the_wire_never_panics() {
+        for len in [
+            "18446744073709551615",
+            "18446744073709551600",
+            "99999999999999999999",
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let len = len.to_string();
+            let handle = std::thread::spawn(move || {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let mut buf = [0u8; 2048];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(
+                        format!("HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n{{}}").as_bytes(),
+                    );
+                }
+            });
+            let got = http_post(&format!("http://{addr}/v1/approvals"), "tok", "{}", 2);
+            assert!(got.is_none() || got.is_some());
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn an_access_we_cannot_read_is_not_a_grant() {
+        for body in [
+            r#"{"decision":"allow_once","access":null,"accessMode":"read"}"#,
+            r#"{"decision":"allow_project","access":"none"}"#,
+            r#"{"decision":"allow_once","accessMode":42}"#,
+        ] {
+            let server = MockServer::start(200, body);
+            let env = toa_env(&server);
+            let choice = ToaChannel.ask(
+                &env,
+                &path_prompt(PathOperation::Write),
+                Instant::now() + Duration::from_secs(5),
+            );
+            assert_ne!(choice, Some(Choice::Once), "{body}");
+            assert_ne!(choice, Some(Choice::Project), "{body}");
+        }
+        // A null access with nothing else still means "what was asked".
+        let server = MockServer::start(200, r#"{"decision":"allow_once","access":null}"#);
+        let env = toa_env(&server);
+        let choice = ToaChannel.ask(
+            &env,
+            &path_prompt(PathOperation::Write),
+            Instant::now() + Duration::from_secs(5),
+        );
+        assert_eq!(choice, Some(Choice::Once));
     }
 }
