@@ -400,6 +400,47 @@ struct ToaApprovalPayload<'a> {
     choices: Vec<ApprovalChoice>,
 }
 
+/// Decodes a chunked transfer-encoded HTTP body.
+/// Returns Some(bytes) if the terminating 0-length chunk has been received and parsed,
+/// or None if the payload is incomplete or invalid.
+fn decode_chunked(data: &[u8]) -> Option<Vec<u8>> {
+    let mut decoded = Vec::new();
+    let mut cursor = 0;
+
+    loop {
+        let rem = &data[cursor..];
+        let crlf_pos = rem.windows(2).position(|w| w == b"\r\n")?;
+        let size_line = std::str::from_utf8(&rem[..crlf_pos]).ok()?;
+        let size_str = size_line.split(';').next()?.trim();
+        let chunk_size = usize::from_str_radix(size_str, 16).ok()?;
+
+        let chunk_start = cursor + crlf_pos + 2;
+        if chunk_size == 0 {
+            // Final chunk: must be followed by CRLF or trailer headers and CRLF
+            let after_zero = &data[chunk_start..];
+            if after_zero.starts_with(b"\r\n") {
+                return Some(decoded);
+            }
+            if after_zero.windows(4).any(|w| w == b"\r\n\r\n") {
+                return Some(decoded);
+            }
+            return None;
+        }
+
+        let chunk_end = chunk_start + chunk_size;
+        let chunk_with_crlf_end = chunk_end + 2;
+        if data.len() < chunk_with_crlf_end {
+            return None;
+        }
+        if &data[chunk_end..chunk_with_crlf_end] != b"\r\n" {
+            return None;
+        }
+
+        decoded.extend_from_slice(&data[chunk_start..chunk_end]);
+        cursor = chunk_with_crlf_end;
+    }
+}
+
 /// Zero-dependency HTTP/1.1 client over `TcpStream`.
 fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u16, String)> {
     let rest = url.strip_prefix("http://")?;
@@ -448,7 +489,9 @@ fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let mut content_length: Option<usize> = None;
+    let mut is_chunked = false;
     let mut header_len: Option<usize> = None;
+    let mut decoded_chunked: Option<Vec<u8>> = None;
 
     loop {
         match stream.read(&mut chunk) {
@@ -467,15 +510,26 @@ fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u
                             };
                             if k.trim().eq_ignore_ascii_case("content-length") {
                                 content_length = v.trim().parse::<usize>().ok();
+                            } else if k.trim().eq_ignore_ascii_case("transfer-encoding")
+                                && v.to_ascii_lowercase().contains("chunked")
+                            {
+                                is_chunked = true;
                             }
                         }
                     }
                 }
-                if let (Some(hlen), Some(clen)) = (header_len, content_length) {
-                    let total = hlen + clen;
-                    if buf.len() >= total {
-                        buf.truncate(total);
-                        break;
+                if let Some(hlen) = header_len {
+                    if is_chunked {
+                        if let Some(decoded) = decode_chunked(&buf[hlen..]) {
+                            decoded_chunked = Some(decoded);
+                            break;
+                        }
+                    } else if let Some(clen) = content_length {
+                        let total = hlen + clen;
+                        if buf.len() >= total {
+                            buf.truncate(total);
+                            break;
+                        }
                     }
                 }
             }
@@ -487,7 +541,16 @@ fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u
     let headers_str = std::str::from_utf8(&buf[..hlen]).ok()?;
     let status_line = headers_str.lines().next()?;
     let status_code = status_line.split_whitespace().nth(1)?.parse::<u16>().ok()?;
-    let body_str = std::str::from_utf8(&buf[hlen..]).ok()?.to_string();
+
+    let body_str = if is_chunked {
+        let decoded = decoded_chunked.or_else(|| decode_chunked(&buf[hlen..]))?;
+        String::from_utf8(decoded).ok()?
+    } else if let Some(clen) = content_length {
+        let end = (hlen + clen).min(buf.len());
+        std::str::from_utf8(&buf[hlen..end]).ok()?.to_string()
+    } else {
+        std::str::from_utf8(&buf[hlen..]).ok()?.to_string()
+    };
 
     Some((status_code, body_str))
 }
@@ -577,7 +640,8 @@ pub fn send_path_request(
 
     let (norm_decision, decision_access) = parse_path_decision(decision);
     let explicit_access = access_str.and_then(parse_path_access_str);
-    let default_access = parse_path_access_str(&req.access_needed).unwrap_or(PathAccessMode::ReadWrite);
+    let default_access =
+        parse_path_access_str(&req.access_needed).unwrap_or(PathAccessMode::ReadWrite);
 
     let access = explicit_access
         .or(decision_access)
@@ -594,9 +658,9 @@ pub fn send_path_request(
 
 fn parse_path_access_str(s: &str) -> Option<PathAccessMode> {
     match s.trim().to_lowercase().as_str() {
-        "read" | "r" | "ro" => Some(PathAccessMode::Read),
+        "read" | "r" | "ro" | "read_only" | "readonly" => Some(PathAccessMode::Read),
         "write" | "w" => Some(PathAccessMode::Write),
-        "read_write" | "rw" => Some(PathAccessMode::ReadWrite),
+        "read_write" | "rw" | "readwrite" => Some(PathAccessMode::ReadWrite),
         _ => None,
     }
 }
@@ -606,18 +670,26 @@ fn parse_path_decision(decision: &str) -> (&str, Option<PathAccessMode>) {
     if let Some(rest) = lower.strip_prefix("rw") {
         if matches!(rest, "1" | "2" | "3") {
             return (scope_num_to_decision(rest), Some(PathAccessMode::ReadWrite));
+        } else if rest.is_empty() {
+            return ("allow_once", Some(PathAccessMode::ReadWrite));
         }
     } else if let Some(rest) = lower.strip_prefix("ro") {
         if matches!(rest, "1" | "2" | "3") {
             return (scope_num_to_decision(rest), Some(PathAccessMode::Read));
+        } else if rest.is_empty() {
+            return ("allow_once", Some(PathAccessMode::Read));
         }
     } else if let Some(rest) = lower.strip_prefix('r') {
         if matches!(rest, "1" | "2" | "3") {
             return (scope_num_to_decision(rest), Some(PathAccessMode::Read));
+        } else if rest.is_empty() || rest == "ead" {
+            return ("allow_once", Some(PathAccessMode::Read));
         }
     } else if let Some(rest) = lower.strip_prefix('w') {
         if matches!(rest, "1" | "2" | "3") {
             return (scope_num_to_decision(rest), Some(PathAccessMode::Write));
+        } else if rest.is_empty() || rest == "rite" {
+            return ("allow_once", Some(PathAccessMode::Write));
         }
     }
     (decision, None)
@@ -694,6 +766,10 @@ pub type Toa = ToaChannel;
 impl Channel for ToaChannel {
     fn available(&self, env: &Env) -> bool {
         discover_toa(Some(env)).is_some()
+    }
+
+    fn is_modal(&self) -> bool {
+        false
     }
 
     fn ask(&self, env: &Env, prompt: &Prompt, deadline: Instant) -> Option<Choice> {
@@ -847,6 +923,106 @@ mod tests {
                 handle: Some(handle),
             }
         }
+
+        fn start_chunked(status_code: u16, chunks: Vec<&'static str>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+            let reqs_clone = Arc::clone(&requests);
+            let shutdown_clone = Arc::clone(&shutdown);
+
+            listener.set_nonblocking(true).expect("set nonblocking");
+
+            let handle = std::thread::spawn(move || {
+                while !shutdown_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let mut buf = Vec::new();
+                            let mut chunk = [0u8; 1024];
+                            let mut content_length = None;
+                            let mut header_len = None;
+
+                            loop {
+                                match stream.read(&mut chunk) {
+                                    Ok(0) => break,
+                                    Ok(n) => {
+                                        buf.extend_from_slice(&chunk[..n]);
+                                        if header_len.is_none() {
+                                            let pos = buf.windows(4).position(|w| w == b"\r\n\r\n");
+                                            if let Some(pos) = pos {
+                                                header_len = Some(pos + 4);
+                                                let h_str = String::from_utf8_lossy(&buf[..pos]);
+                                                for line in h_str.lines() {
+                                                    let Some((k, v)) = line.split_once(':') else {
+                                                        continue;
+                                                    };
+                                                    if k.trim()
+                                                        .eq_ignore_ascii_case("content-length")
+                                                    {
+                                                        content_length =
+                                                            v.trim().parse::<usize>().ok();
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if let (Some(hl), Some(cl)) = (header_len, content_length) {
+                                            let total = hl + cl;
+                                            if buf.len() >= total {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                        std::thread::sleep(Duration::from_millis(5));
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+
+                            if let Some(hl) = header_len {
+                                let body_slice = &buf[hl..];
+                                let json_val: serde_json::Value =
+                                    serde_json::from_slice(body_slice).unwrap_or_default();
+                                let req_str = String::from_utf8_lossy(&buf).to_string();
+                                reqs_clone.lock().unwrap().push((req_str, json_val));
+                            }
+
+                            let mut resp = format!(
+                                "HTTP/1.1 {status_code} OK\r\n\
+                                 Content-Type: application/json\r\n\
+                                 Transfer-Encoding: chunked\r\n\
+                                 Connection: close\r\n\
+                                 \r\n"
+                            )
+                            .into_bytes();
+
+                            for c in &chunks {
+                                resp.extend_from_slice(
+                                    format!("{:x}\r\n{}\r\n", c.len(), c).as_bytes(),
+                                );
+                            }
+                            resp.extend_from_slice(b"0\r\n\r\n");
+
+                            let _ = stream.write_all(&resp);
+                            let _ = stream.flush();
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+
+            Self {
+                addr,
+                requests,
+                listener_shutdown: shutdown,
+                handle: Some(handle),
+            }
+        }
     }
 
     impl Drop for MockServer {
@@ -907,6 +1083,36 @@ mod tests {
             (
                 r#"{"decision":"allow_once","accessMode":"ro"}"#,
                 PathApprovalOutcome::AllowOnce {
+                    access: PathAccessMode::Read,
+                },
+            ),
+            (
+                r#"{"decision":"ro"}"#,
+                PathApprovalOutcome::AllowOnce {
+                    access: PathAccessMode::Read,
+                },
+            ),
+            (
+                r#"{"decision":"r1"}"#,
+                PathApprovalOutcome::AllowOnce {
+                    access: PathAccessMode::Read,
+                },
+            ),
+            (
+                r#"{"decision":"read"}"#,
+                PathApprovalOutcome::AllowOnce {
+                    access: PathAccessMode::Read,
+                },
+            ),
+            (
+                r#"{"decision":"ro1"}"#,
+                PathApprovalOutcome::AllowOnce {
+                    access: PathAccessMode::Read,
+                },
+            ),
+            (
+                r#"{"decision":"allow_session","accessMode":"read"}"#,
+                PathApprovalOutcome::AllowSession {
                     access: PathAccessMode::Read,
                 },
             ),
@@ -1153,5 +1359,60 @@ mod tests {
 
         let choice = channel.ask(&env, &prompt, Instant::now() + Duration::from_secs(5));
         assert_eq!(choice, Some(Choice::Project));
+    }
+
+    #[test]
+    fn test_chunked_transfer_encoding_decoding() {
+        // 1. Direct decode_chunked unit tests
+        let raw = b"4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
+        let decoded = decode_chunked(raw).expect("decode Wiki pedia");
+        assert_eq!(decoded, b"Wikipedia");
+
+        // Chunk extensions and trailers
+        let raw_ext = b"7;ext=foo\r\nHello, \r\n6\r\nworld!\r\n0\r\nTrailer: test\r\n\r\n";
+        let decoded_ext = decode_chunked(raw_ext).expect("decode with ext and trailers");
+        assert_eq!(decoded_ext, b"Hello, world!");
+
+        // 2. Integration test: Mock server sending chunked response
+        let server = MockServer::start_chunked(200, vec![r#"{"decision":"#, r#""allow_once"}"#]);
+        let mut env = Env::default();
+        env.vars
+            .insert("TOA_GATEWAY_URL".into(), format!("http://{}", server.addr));
+        env.vars.insert("TOA_HOOK_TOKEN".into(), "tok".into());
+
+        let req = CommandApprovalRequest {
+            id: "cmd-chunked".into(),
+            cli: None,
+            session_id: None,
+            cwd: "/tmp".into(),
+            command: "ls -la".into(),
+            reason: None,
+            rule_name: None,
+            timeout_secs: 5,
+        };
+
+        let outcome = with_test_env(env.clone(), || resolve_approval(&["toa", "ask"], &req));
+        assert_eq!(outcome, Some(ApprovalOutcome::AllowOnce));
+
+        let channel = ToaChannel;
+        let prompt = Prompt {
+            id: "prompt-chunked".into(),
+            cwd: "/tmp".into(),
+            request: Request::Command {
+                commands: vec!["ls -la".into()],
+            },
+        };
+        let choice = with_test_env(env.clone(), || {
+            channel.ask(&env, &prompt, Instant::now() + Duration::from_secs(5))
+        });
+        assert_eq!(choice, Some(Choice::Once));
+    }
+
+    #[test]
+    fn test_toa_channel_is_non_modal() {
+        let channel = ToaChannel;
+        // Non-modal channels (TOA) bypass the local modal UI lock (Queue::wait_turn)
+        // so multiple agents/terminals can submit approvals simultaneously.
+        assert!(!channel.is_modal());
     }
 }

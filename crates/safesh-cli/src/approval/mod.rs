@@ -275,6 +275,13 @@ pub trait Channel {
     fn available(&self, env: &Env) -> bool;
     /// `None` means no answer: timeout, closed window, or channel error.
     fn ask(&self, env: &Env, prompt: &Prompt, deadline: Instant) -> Option<Choice>;
+    /// Whether this channel requires modal serialization via `files::Queue::wait_turn`.
+    /// Desktop dialogs and tmux popups are modal and collide if shown simultaneously.
+    /// Non-modal channels such as TOA (`ToaChannel`) manage multiplexed queues centrally
+    /// and must not acquire the local machine-wide UI lock.
+    fn is_modal(&self) -> bool {
+        true
+    }
 }
 
 /// Approval channels by config name. `ask` is not here: it is hook output, not a channel driver.
@@ -316,10 +323,30 @@ pub fn ask_with(
     if env.var("SAFESH_APPROVAL") == Some("off") {
         return None;
     }
-    let _turn = files::Queue::wait_turn(&env.state_dir, &prompt.id, timing.give_up_at)?;
     let deadline = (Instant::now() + timing.show).min(timing.give_up_at);
+
+    // 1. Try non-modal channels first (e.g. TOA) without acquiring the modal desktop lock.
+    // This allows multiple agents and terminals to queue approval requests concurrently in TOA.
+    let mut modal_channels = Vec::new();
     for ch in channels.iter().filter(|c| c.available(env)) {
-        if let Some(choice) = ch.ask(env, prompt, deadline) {
+        if !ch.is_modal() {
+            if let Some(choice) = ch.ask(env, prompt, deadline) {
+                return Some(choice);
+            }
+        } else {
+            modal_channels.push(ch);
+        }
+    }
+
+    if modal_channels.is_empty() {
+        return None;
+    }
+
+    // 2. For modal channels (tmux, gui), serialize prompt display via the local file queue.
+    let _turn = files::Queue::wait_turn(&env.state_dir, &prompt.id, timing.give_up_at)?;
+    let modal_deadline = (Instant::now() + timing.show).min(timing.give_up_at);
+    for ch in modal_channels {
+        if let Some(choice) = ch.ask(env, prompt, modal_deadline) {
             return Some(choice);
         }
     }
