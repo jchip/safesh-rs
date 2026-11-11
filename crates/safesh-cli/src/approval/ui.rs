@@ -5,7 +5,7 @@
 //! as no answer.
 //!
 //! The cursor starts on a "Pick a selection" row, so a stray Enter typed into the agent pane
-//! does nothing. Arrows (or j/k) move the cursor and Enter picks. A digit picks right away.
+//! does nothing. Arrows, j/k or a digit move the cursor, and only Enter picks.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -68,9 +68,7 @@ fn screen(prompt: &Prompt) -> Vec<String> {
 /// The placeholder row, then one row per choice. Row `sel` is marked.
 fn choice_rows(req: &Request, sel: usize) -> Vec<String> {
     let n = req.choices().len();
-    let mut rows = vec![format!(
-        "Pick a selection (up/down then Enter, or press 1-{n})"
-    )];
+    let mut rows = vec![format!("Pick a selection (up/down or 1-{n}, then Enter)")];
     rows.extend(numbered_labels(req));
     rows.iter()
         .enumerate()
@@ -162,9 +160,7 @@ impl Picker {
             Key::Up => self.sel = self.sel.saturating_sub(1),
             Key::Down => self.sel = (self.sel + 1).min(self.n),
             Key::Enter if self.sel > 0 => return Step::Pick(self.sel - 1),
-            Key::Digit(d) if (1..=self.n).contains(&usize::from(d)) => {
-                return Step::Pick(usize::from(d) - 1);
-            }
+            Key::Digit(d) if (1..=self.n).contains(&usize::from(d)) => self.sel = usize::from(d),
             Key::Cancel => return Step::Cancel,
             _ => {}
         }
@@ -295,7 +291,18 @@ mod tests {
         let keys: Vec<_> = std::iter::from_fn(|| next_key(&mut b)).collect();
         assert_eq!(
             keys,
-            [Up, Down, Up, Down, Up, Enter, Enter, Digit(3), Cancel, Other]
+            [
+                Up,
+                Down,
+                Up,
+                Down,
+                Up,
+                Enter,
+                Enter,
+                Digit(3),
+                Cancel,
+                Other
+            ]
         );
     }
 
@@ -322,11 +329,13 @@ mod tests {
     }
 
     #[test]
-    fn digits_pick_in_range() {
+    fn digits_move_then_enter_picks() {
         let mut p = Picker::new(4);
-        assert_eq!(p.key(Key::Digit(1)), Step::Pick(0));
-        assert_eq!(p.key(Key::Digit(4)), Step::Pick(3));
+        assert_eq!(p.key(Key::Digit(4)), Step::Redraw);
+        assert_eq!(p.key(Key::Digit(4)), Step::Ignore);
         assert_eq!(p.key(Key::Digit(5)), Step::Ignore);
+        assert_eq!(p.key(Key::Digit(1)), Step::Redraw);
+        assert_eq!(p.key(Key::Enter), Step::Pick(0));
         assert_eq!(p.key(Key::Cancel), Step::Cancel);
     }
 }
