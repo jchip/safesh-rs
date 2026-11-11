@@ -157,6 +157,10 @@ impl Gate for PolicyGate {
         Err(self.block_command(&commands, req.cwd, &reasons))
     }
 
+    fn runs_in_engine(&self, program: &Path, cwd: &Path) -> bool {
+        self.ctx.policy.is_agent_script(program, cwd)
+    }
+
     fn check_open(&self, path: &Path, access: Access) -> Result<(), String> {
         let cwd = path.parent().unwrap_or(path);
         match self.ctx.policy.check_path(path, cwd, access) {

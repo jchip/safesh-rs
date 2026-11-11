@@ -390,6 +390,15 @@ impl Policy {
             || crate::scratchpad::is_new_session_scratchpad_script(abs, sid, uid)
     }
 
+    /// Whether `program` (absolute) is a script the agent can write and run without asking:
+    /// one under the project roots or in this session's scratchpad. The engine runs such
+    /// `#!` shell scripts itself, so their commands are checked.
+    #[must_use]
+    pub fn is_agent_script(&self, program: &Path, cwd: &Path) -> bool {
+        let p = program.to_string_lossy();
+        self.within_roots(&p, cwd) || self.is_scratchpad_script(&p)
+    }
+
     fn within_roots(&self, path: &str, cwd: &Path) -> bool {
         let cwd_s = cwd.to_string_lossy();
         let path = resolve_lexical(&cwd_s, path);

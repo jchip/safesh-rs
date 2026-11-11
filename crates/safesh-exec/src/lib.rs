@@ -1,9 +1,11 @@
 //! brush-core embedding: runs a script with a policy gate on every exec and file open.
 //!
 //! Nested `bash`, `sh` and `dash` are re-routed to `safesh shell`, so their commands hit the gate too.
+//! So are `#!` shell scripts the agent can write, such as `./build.sh` in the project.
 //! A denial prints the gate's message and stops the whole run with status 126.
 
 mod args;
+mod shebang;
 
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -35,6 +37,9 @@ pub trait Gate: Send + Sync {
     fn check_exec(&self, req: &ExecRequest<'_>) -> Result<(), String>;
     /// `path` is absolute.
     fn check_open(&self, path: &Path, access: Access) -> Result<(), String>;
+    /// Whether `program` (absolute) is a script the engine must run itself when its `#!` names
+    /// a shell, instead of letting the kernel start that shell outside the gate.
+    fn runs_in_engine(&self, program: &Path, cwd: &Path) -> bool;
 }
 
 /// Settings shared by every launch in one run.
@@ -78,26 +83,36 @@ impl PolicyLauncher {
         ctx.gate.check_exec(&exec).map_err(|m| abort(&m))
     }
 
-    /// Re-route nested shells to `safesh shell`, keeping their arguments.
+    /// Re-route nested shells, and agent scripts whose `#!` names a shell, to `safesh shell`,
+    /// keeping their arguments.
     fn reroute_shell(&self, req: &mut LaunchRequest) {
         let Some(ctx) = self.ctx.as_deref() else {
             return;
         };
+        let mut name = req.argv0.clone();
+        let mut lead = Vec::new();
         // Windows: `C:\Git\usr\bin\bash.exe` is `bash`, so it is rerouted too.
-        let is_shell = matches!(
-            safesh_policy::paths::command_name(&req.program.to_string_lossy()),
-            "bash" | "sh" | "dash"
-        );
-        if !is_shell {
-            return;
+        if !shebang::is_shell(&req.program.to_string_lossy()) {
+            let abs = req.working_dir.join(&req.program);
+            if !ctx.gate.runs_in_engine(&abs, &req.working_dir) {
+                return;
+            }
+            // Start the shell the way the kernel would: `<shell> [opts] <script> <args>`.
+            let Some((interp, opts)) = shebang::shell_shebang(&abs) else {
+                return;
+            };
+            name = interp;
+            lead = opts;
+            lead.push(req.program.to_string_lossy().into_owned());
         }
         req.program.clone_from(&ctx.self_exe);
         let mut args = vec![
             "shell".to_string(),
             "--shell-name".into(),
-            req.argv0.clone(),
+            name,
             "--".into(),
         ];
+        args.append(&mut lead);
         args.append(&mut req.args);
         req.args = args;
         req.argv0 = "safesh".into();
