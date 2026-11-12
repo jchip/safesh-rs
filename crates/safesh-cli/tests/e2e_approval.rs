@@ -13,6 +13,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 const FAKE_TMUX: &str = r#"#!/bin/sh
+if [ "$1" = "display-message" ]; then echo 1 3.8; exit 0; fi
 for a in "$@"; do
   if [ "$a" = "-C" ]; then echo close >> "$FAKE_LOG"; exit 0; fi
 done

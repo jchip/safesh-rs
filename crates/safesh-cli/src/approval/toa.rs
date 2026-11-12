@@ -484,6 +484,16 @@ const HOLD_MARGIN_SECS: u64 = 2;
 
 /// Zero-dependency HTTP/1.1 client over `TcpStream`.
 fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u16, String)> {
+    http_request("POST", url, token, body, timeout_secs)
+}
+
+fn http_request(
+    method: &str,
+    url: &str,
+    token: &str,
+    body: &str,
+    timeout_secs: u64,
+) -> Option<(u16, String)> {
     let rest = url.strip_prefix("http://")?;
     let (host_port, path) = match rest.find('/') {
         Some(idx) => (&rest[..idx], &rest[idx..]),
@@ -513,7 +523,7 @@ fn http_post(url: &str, token: &str, body: &str, timeout_secs: u64) -> Option<(u
     stream.set_write_timeout(Some(timeout)).ok()?;
 
     let req = format!(
-        "POST {path} HTTP/1.1\r\n\
+        "{method} {path} HTTP/1.1\r\n\
          Host: {host_port}\r\n\
          Authorization: Bearer {token}\r\n\
          Content-Type: application/json\r\n\
@@ -814,6 +824,15 @@ pub fn resolve_path_approval(
     resolve_path_approval_with_env(channels, None, req)
 }
 
+/// The daemon answers `GET /v1/health`. Loopback, so a dead daemon fails at once.
+fn gateway_up(disco: &ToaDiscovery) -> bool {
+    let url = format!("{}/v1/health", disco.gateway_url);
+    matches!(
+        http_request("GET", &url, &disco.hook_token, "", 1),
+        Some((200, _))
+    )
+}
+
 /// TOA approval channel implementing [`Channel`].
 #[derive(Debug, Clone, Default)]
 pub struct ToaChannel;
@@ -822,8 +841,10 @@ pub struct ToaChannel;
 pub type Toa = ToaChannel;
 
 impl Channel for ToaChannel {
+    /// TOA delivers answers only into its own terminals and has no signal for an open UI.
+    /// So it counts only when this agent runs in a TOA terminal and the daemon answers.
     fn available(&self, env: &Env) -> bool {
-        discover_toa(Some(env)).is_some()
+        discover_toa(Some(env)).is_some_and(|d| d.terminal_id.is_some() && gateway_up(&d))
     }
 
     fn is_modal(&self) -> bool {
@@ -1410,6 +1431,7 @@ mod tests {
         env.vars
             .insert("TOA_GATEWAY_URL".into(), format!("http://{}", server.addr));
         env.vars.insert("TOA_HOOK_TOKEN".into(), "trait-tok".into());
+        env.vars.insert("TOA_TERMINAL_ID".into(), "term-1".into());
 
         assert!(channel.available(&env));
 
@@ -1424,6 +1446,36 @@ mod tests {
 
         let choice = channel.ask(&env, &prompt, Instant::now() + Duration::from_secs(5));
         assert_eq!(choice, Some(Choice::Project));
+    }
+
+    #[test]
+    fn toa_unavailable_without_terminal_or_daemon() {
+        let server = MockServer::start(200, r#"{"status":"ok"}"#);
+        let mut env = toa_env(&server);
+        // No TOA terminal: TOA could only time out, so it is skipped.
+        assert!(!ToaChannel.available(&env));
+        assert!(server.requests.lock().unwrap().is_empty());
+
+        env.vars.insert("TOA_TERMINAL_ID".into(), "term-1".into());
+        assert!(ToaChannel.available(&env));
+        let reqs = server.requests.lock().unwrap();
+        assert!(reqs[0].0.starts_with("GET /v1/health HTTP/1.1"));
+        drop(reqs);
+
+        // Daemon down: nothing listens on the port.
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        env.vars
+            .insert("TOA_GATEWAY_URL".into(), format!("http://{port}"));
+        assert!(!ToaChannel.available(&env));
+
+        // Daemon answers but not healthy.
+        let bad = MockServer::start(503, "{}");
+        env.vars
+            .insert("TOA_GATEWAY_URL".into(), format!("http://{}", bad.addr));
+        assert!(!ToaChannel.available(&env));
     }
 
     #[test]

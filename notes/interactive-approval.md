@@ -25,13 +25,14 @@ So a popup that safesh draws inside the agent's terminal is not possible. Two th
 
 ## 3. Approval channels
 
-safesh tries channels in order and uses the first one that is available. If none answers, it falls back to text.
+safesh tries channels in order and uses the first one that is available. If none answers, it falls back to text. "Available" means a person can see the prompt now. A config file or env var alone is not enough.
 
 | Order | Channel | Available when | Stage |
 |---|---|---|---|
 | 1 | Agent-native "ask" | the hook runs as `safesh hook claude` | pre-check only |
-| 2 | tmux popup | `$TMUX` and `$TMUX_PANE` are set in the hook env | pre-check and runtime |
-| 3 | GUI dialog | macOS, not over SSH; Linux with `$DISPLAY` or `$WAYLAND_DISPLAY` and `zenity` or `kdialog`; never when the tmux client is over SSH | pre-check and runtime |
+| 2 | tmux popup | `$TMUX` and `$TMUX_PANE` are set, the pane exists, its session has an attached client, and tmux is 3.2 or later | pre-check and runtime |
+| 3 | GUI dialog | macOS: not over SSH and this user owns `/dev/console`. Linux: `zenity` or `kdialog`, and the `$DISPLAY` or `$WAYLAND_DISPLAY` socket accepts a connection. Never when the tmux client is over SSH | pre-check and runtime |
+| — | TOA | `$TOA_TERMINAL_ID` is set (the agent runs in a TOA terminal) and `GET /v1/health` answers. TOA has no signal for an open UI | pre-check and runtime |
 | 4 | Text (today) | always | pre-check and runtime |
 
 Channel details:

@@ -186,6 +186,8 @@ pub struct Env {
     /// `$PATH`: at runtime the env comes from the agent's shell, which could put a fake dialog
     /// first. On Windows it is `System32\WindowsPowerShell\v1.0`, with the system dir from Win32.
     pub bin_dirs: Vec<PathBuf>,
+    /// A desktop of this user is on screen, so a dialog can be seen. Only the GUI channel reads it.
+    pub desktop: bool,
 }
 
 impl Env {
@@ -195,6 +197,7 @@ impl Env {
         "TMUX_PANE",
         "DISPLAY",
         "WAYLAND_DISPLAY",
+        "XDG_RUNTIME_DIR",
         "SSH_CONNECTION",
         "SSH_CLIENT",
         "SSH_TTY",
@@ -212,7 +215,7 @@ impl Env {
 
     #[must_use]
     pub fn from_process(state_dir: &Path) -> Self {
-        let vars = Self::KEYS
+        let vars: HashMap<String, String> = Self::KEYS
             .iter()
             .filter_map(|k| {
                 std::env::var(k)
@@ -226,6 +229,7 @@ impl Env {
             safesh_policy::compat::system_dir().and_then(|d| d.parent().map(Path::to_path_buf));
         #[cfg(not(windows))]
         let win_root = None;
+        let desktop = gui::desktop_on_screen(&vars);
         Self {
             vars,
             macos: cfg!(target_os = "macos"),
@@ -234,6 +238,7 @@ impl Env {
             exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("safesh")),
             state_dir: state_dir.to_path_buf(),
             bin_dirs: Self::bin_dirs(),
+            desktop,
         }
     }
 
@@ -378,6 +383,8 @@ pub fn cli_ask(
     let mut env = Env::from_process(&host.state_dir);
     if !bin_dirs.is_empty() {
         env.bin_dirs = bin_dirs;
+        // Fake dialogs need no real desktop.
+        env.desktop = true;
     }
     let prompt = Prompt {
         id: id.to_string(),

@@ -4,7 +4,8 @@
 //! Prompt text and labels reach the dialog only as argv items (env vars on Windows), never as
 //! script source.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -25,10 +26,12 @@ impl Channel for Gui {
             return false;
         }
         if env.macos {
-            return !env.over_ssh() && env.find_bin("osascript").is_some();
+            return !env.over_ssh() && env.desktop && env.find_bin("osascript").is_some();
         }
         let display = env.var("DISPLAY").is_some() || env.var("WAYLAND_DISPLAY").is_some();
-        display && (env.find_bin("zenity").is_some() || env.find_bin("kdialog").is_some())
+        display
+            && env.desktop
+            && (env.find_bin("zenity").is_some() || env.find_bin("kdialog").is_some())
     }
 
     fn ask(&self, env: &Env, prompt: &Prompt, deadline: Instant) -> Option<Choice> {
@@ -53,6 +56,74 @@ impl Channel for Gui {
         };
         choice_from_label(&prompt.request, &proc::run(cmd, deadline)?)
     }
+}
+
+/// Whether a desktop of this user is on screen.
+/// - macOS: this user owns `/dev/console`. The login window or another user's desktop (fast
+///   user switching) gives another owner.
+/// - Linux: the X or Wayland display named in the env accepts a connection.
+/// - Windows: always true. Its checks are in `Gui::available`.
+#[cfg(unix)]
+pub(super) fn desktop_on_screen(vars: &HashMap<String, String>) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    if cfg!(target_os = "macos") {
+        let uid = rustix::process::getuid().as_raw();
+        return std::fs::metadata("/dev/console").is_ok_and(|m| m.uid() == uid);
+    }
+    display_sockets(vars).iter().any(Socket::accepts)
+}
+
+#[cfg(not(unix))]
+pub(super) fn desktop_on_screen(_: &HashMap<String, String>) -> bool {
+    true
+}
+
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(unix), allow(dead_code))]
+enum Socket {
+    Unix(PathBuf),
+    Tcp(String, u16),
+}
+
+impl Socket {
+    #[cfg(unix)]
+    fn accepts(&self) -> bool {
+        match self {
+            Self::Unix(p) => std::os::unix::net::UnixStream::connect(p).is_ok(),
+            Self::Tcp(host, port) => {
+                use std::net::{TcpStream, ToSocketAddrs};
+                (host.as_str(), *port).to_socket_addrs().is_ok_and(|mut a| {
+                    a.any(|a| TcpStream::connect_timeout(&a, Duration::from_millis(300)).is_ok())
+                })
+            }
+        }
+    }
+}
+
+/// Sockets of the displays named by `DISPLAY` and `WAYLAND_DISPLAY`.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn display_sockets(vars: &HashMap<String, String>) -> Vec<Socket> {
+    let mut out = Vec::new();
+    // `[host]:N[.screen]`. No host or `unix` means the local socket, else TCP port 6000+N.
+    if let Some((host, rest)) = vars.get("DISPLAY").and_then(|d| d.rsplit_once(':'))
+        && let Ok(n) = rest.split('.').next().unwrap_or("").parse::<u16>()
+    {
+        out.push(if host.is_empty() || host == "unix" {
+            Socket::Unix(PathBuf::from(format!("/tmp/.X11-unix/X{n}")))
+        } else {
+            Socket::Tcp(host.to_string(), 6000u16.saturating_add(n))
+        });
+    }
+    // A bare name lives in `XDG_RUNTIME_DIR`.
+    if let Some(w) = vars.get("WAYLAND_DISPLAY") {
+        let p = Path::new(w);
+        if p.is_absolute() {
+            out.push(Socket::Unix(p.to_path_buf()));
+        } else if let Some(dir) = vars.get("XDG_RUNTIME_DIR") {
+            out.push(Socket::Unix(Path::new(dir).join(p)));
+        }
+    }
+    out
 }
 
 /// Inside tmux our SSH vars can be stale. tmux copies `SSH_CONNECTION` from each attaching
@@ -553,6 +624,7 @@ mod tests {
                 vars,
                 macos,
                 bin_dirs,
+                desktop: true,
                 ..Env::default()
             },
             dir,
@@ -570,6 +642,66 @@ mod tests {
         assert!(ok(false, &[("DISPLAY", ":0")], &["zenity"]));
         assert!(ok(false, &[("WAYLAND_DISPLAY", "w")], &["kdialog"]));
         assert!(!ok(false, &[("DISPLAY", ":0")], &[]));
+    }
+
+    #[test]
+    fn no_desktop_on_screen_blocks_gui() {
+        for (macos, vars, bin) in [
+            (true, vec![], "osascript"),
+            (false, vec![("DISPLAY", ":0")], "zenity"),
+        ] {
+            let (mut e, _d) = env(macos, &vars, &[bin]);
+            assert!(Gui.available(&e));
+            e.desktop = false;
+            assert!(!Gui.available(&e));
+        }
+    }
+
+    #[test]
+    fn display_sockets_from_env() {
+        let s = |vars: &[(&str, &str)]| {
+            let vars: HashMap<String, String> = vars
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect();
+            display_sockets(&vars)
+        };
+        let x = |n: &str| Socket::Unix(PathBuf::from(format!("/tmp/.X11-unix/X{n}")));
+        assert_eq!(s(&[("DISPLAY", ":0")]), [x("0")]);
+        assert_eq!(s(&[("DISPLAY", ":1.0")]), [x("1")]);
+        assert_eq!(s(&[("DISPLAY", "unix:2")]), [x("2")]);
+        assert_eq!(
+            s(&[("DISPLAY", "localhost:10.0")]),
+            [Socket::Tcp("localhost".into(), 6010)]
+        );
+        assert_eq!(s(&[("DISPLAY", "garbage")]), []);
+        assert_eq!(
+            s(&[
+                ("WAYLAND_DISPLAY", "wayland-0"),
+                ("XDG_RUNTIME_DIR", "/run/user/1")
+            ]),
+            [Socket::Unix(PathBuf::from("/run/user/1/wayland-0"))]
+        );
+        assert_eq!(
+            s(&[("WAYLAND_DISPLAY", "/w/sock")]),
+            [Socket::Unix(PathBuf::from("/w/sock"))]
+        );
+        // A bare Wayland name without a runtime dir cannot be found.
+        assert_eq!(s(&[("WAYLAND_DISPLAY", "wayland-0")]), []);
+    }
+
+    #[test]
+    fn socket_accepts_only_a_listener() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("X0");
+        assert!(!Socket::Unix(p.clone()).accepts());
+        let _l = std::os::unix::net::UnixListener::bind(&p).unwrap();
+        assert!(Socket::Unix(p).accepts());
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        assert!(Socket::Tcp("127.0.0.1".into(), port).accepts());
+        drop(l);
+        assert!(!Socket::Tcp("127.0.0.1".into(), port).accepts());
     }
 
     #[test]

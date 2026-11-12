@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use std::process::Command;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::{Channel, Choice, Env, Prompt, files, proc, ui};
 use crate::hook::sh_quote;
@@ -11,9 +11,12 @@ pub struct Tmux;
 
 impl Channel for Tmux {
     fn available(&self, env: &Env) -> bool {
-        env.var("TMUX").is_some()
-            && env.var("TMUX_PANE").is_some()
-            && env.find_bin("tmux").is_some()
+        let (Some(_), Some(pane), Some(tmux)) =
+            (env.var("TMUX"), env.var("TMUX_PANE"), env.find_bin("tmux"))
+        else {
+            return false;
+        };
+        popup_can_show(&tmux, pane)
     }
 
     fn ask(&self, env: &Env, prompt: &Prompt, deadline: Instant) -> Option<Choice> {
@@ -28,6 +31,39 @@ impl Channel for Tmux {
                 .status();
         }
         files::take_answer(&env.state_dir, &prompt.id, &nonce)
+    }
+}
+
+/// The pane still exists, a client has its session attached, and tmux has `display-popup`.
+fn popup_can_show(tmux: &Path, pane: &str) -> bool {
+    let mut cmd = Command::new(tmux);
+    cmd.args([
+        "display-message",
+        "-p",
+        "-t",
+        pane,
+        "#{session_attached} #{version}",
+    ]);
+    // tmux answers in milliseconds. The slack covers a slow first exec.
+    proc::run(cmd, Instant::now() + Duration::from_secs(2)).is_some_and(|out| {
+        let mut it = out.split_whitespace();
+        let attached = it.next().and_then(|n| n.parse::<u32>().ok());
+        attached.is_some_and(|n| n > 0) && it.next().is_some_and(has_popup)
+    })
+}
+
+/// `display-popup` came in tmux 3.2. Versions look like `3.4`, `3.3a`, `next-3.6` or
+/// `openbsd-7.4`.
+fn has_popup(version: &str) -> bool {
+    let v = version.rsplit('-').next().unwrap_or(version);
+    let mut parts = v.split('.');
+    let num = |s: Option<&str>| {
+        let d: String = s?.chars().take_while(char::is_ascii_digit).collect();
+        d.parse::<u32>().ok()
+    };
+    match (num(parts.next()), num(parts.next())) {
+        (Some(major), Some(minor)) => (major, minor) >= (3, 2),
+        _ => false,
     }
 }
 
@@ -60,4 +96,55 @@ fn popup_cmd(tmux: &Path, env: &Env, prompt: &Prompt, pane: &str, deadline: Inst
         .arg(format!(" {} ", prompt.request.title()))
         .arg(&inner);
     cmd
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    /// Env inside tmux pane %1, with a fake `tmux` that runs `script`.
+    fn env(script: &str) -> (Env, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("tmux");
+        std::fs::write(&p, script).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut env = Env {
+            bin_dirs: vec![dir.path().to_path_buf()],
+            ..Env::default()
+        };
+        env.vars
+            .insert("TMUX".into(), "/tmp/tmux-1/default,1,0".into());
+        env.vars.insert("TMUX_PANE".into(), "%1".into());
+        (env, dir)
+    }
+
+    #[test]
+    fn popup_versions() {
+        for v in ["3.2", "3.3a", "3.10", "4.0", "next-3.6", "openbsd-7.4"] {
+            assert!(has_popup(v), "{v}");
+        }
+        for v in ["3.1", "3.1c", "2.9a", "next", "", "x.y"] {
+            assert!(!has_popup(v), "{v}");
+        }
+    }
+
+    #[test]
+    fn available_only_when_pane_is_attached() {
+        let ok = |script: &str| Tmux.available(&env(script).0);
+        assert!(ok("#!/bin/sh\necho 1 3.8\n"));
+        assert!(ok("#!/bin/sh\necho 2 3.2\n"));
+        // Detached session.
+        assert!(!ok("#!/bin/sh\necho 0 3.8\n"));
+        // No display-popup before 3.2, and no version means unknown.
+        assert!(!ok("#!/bin/sh\necho 1 3.1c\n"));
+        assert!(!ok("#!/bin/sh\necho 1\n"));
+        // Pane gone: tmux errors.
+        assert!(!ok("#!/bin/sh\necho \"can't find pane\" >&2; exit 1\n"));
+        // Not inside tmux.
+        let (mut e, _d) = env("#!/bin/sh\necho 1 3.8\n");
+        e.vars.remove("TMUX");
+        assert!(!Tmux.available(&e));
+    }
 }
