@@ -27,7 +27,7 @@ serde_path_to_error = "0.1.20"
 brush-parser = { git = "https://github.com/reubeno/brush", rev = "b2f7782cc941d8c7777940aef1a046986c45c0c3" }
 brush-core = { git = "https://github.com/reubeno/brush", rev = "b2f7782cc941d8c7777940aef1a046986c45c0c3" }
 brush-builtins = { git = "https://github.com/reubeno/brush", rev = "b2f7782cc941d8c7777940aef1a046986c45c0c3" }
-tokio = { version = "1.52", features = ["rt", "macros"] }
+tokio = { version = "1.52", features = ["rt", "macros", "time"] }
 signal-hook = "0.3"
 clap = { version = "4.6", features = ["derive"] }
 sha2 = "0.10"

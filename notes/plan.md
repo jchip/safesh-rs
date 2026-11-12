@@ -53,12 +53,13 @@ Exit check: the ported tests pass with the same decisions as TS.
 
 Scratch inputs and harnesses are in `.temp/`, which is gitignored: `p1-test-spec.md`, `port-inventory.md`, `p2-corpus/` (transcript differential), `alpha-conformance/` (engine corpus), `smoke/smoke.sh`.
 
-1. Run shadow mode for two weeks and review `shadow.jsonl` diffs weekly (P5).
-2. Open the upstream brush PRs: `check_open` on `ProcessLauncher`, and `wait <pid>`.
-3. Commit the engine corpus and run it against bash 5 on Linux and macOS in CI.
-4. Decide on cwd `/`. The facade adds the base cwd to default read, so cwd `/` makes every path readable (deny lists still win). TS missed this case only through an `isPathWithin` quirk.
-5. Make the scratchpad tests hermetic. Two of them touch the real `/tmp/claude-<uid>`, as the TS tests did.
-6. Keep backgrounded builtins alive until they finish, or document the limit.
+1. Run shadow mode for two weeks and review `shadow.jsonl` diffs weekly (P5): **Dropped** (fully switched over to the Rust hook).
+2. Open the upstream brush PRs: `check_open` on `ProcessLauncher`, and `wait <pid>`: **Dropped**.
+3. Commit the engine corpus and run it against bash 5 on Linux and macOS in CI: **Deferred** ("not yet").
+4. Decide on cwd `/`: **Done** (cwd `/` is omitted from default read, and running from `/` is disallowed).
+5. Make the scratchpad tests hermetic: **Done** (refactored to test in isolated temp directories via `is_session_scratchpad_script_in`).
+6. Keep backgrounded builtins alive until they finish: **Done** (background tasks run asynchronously without blocking execution, and the runner waits for them on exit).
+7. Built-in `timeout` wrapper: **Done** (bundled GNU coreutils `timeout` builtin in `safesh-exec` for macOS where `/usr/bin/timeout` is missing).
 
 Rows pv-*, cv-5, cv-7 and pd-13 to pd-15 stay skipped. They cover `external`, which is out of scope.
 

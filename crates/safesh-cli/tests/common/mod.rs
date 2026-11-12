@@ -71,7 +71,7 @@ pub struct Run {
 }
 
 impl Run {
-    fn of(o: &Output) -> Self {
+    pub fn of(o: &Output) -> Self {
         Self {
             code: o.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&o.stdout).into_owned(),

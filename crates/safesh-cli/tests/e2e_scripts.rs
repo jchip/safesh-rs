@@ -175,3 +175,68 @@ fn shell_script_tool_outside_project_runs_natively() {
     assert_eq!(r.code, 0, "stdout={} stderr={}", r.stdout, r.stderr);
     assert!(r.stdout.contains("RAN deploy"), "{}", r.stdout);
 }
+
+#[test]
+fn background_builtin_finishes_output() {
+    let e = Env::new();
+    let r = e.hook_run("echo hi & echo after");
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.stdout.contains("after"), "{}", r.stdout);
+    assert!(r.stdout.contains("hi"), "{}", r.stdout);
+}
+
+#[test]
+fn root_directory_not_allowed() {
+    let e = Env::new();
+    let mut cmd = e.safesh(&["check", "echo test"]);
+    cmd.current_dir("/");
+    let o = cmd.output().expect("spawn safesh");
+    let r = Run::of(&o);
+    assert_ne!(r.code, 0);
+    assert!(
+        r.stderr.contains("running in root directory '/' is not allowed"),
+        "stderr: {}",
+        r.stderr
+    );
+}
+
+#[test]
+fn timeout_builtin_completes_within_limit() {
+    let e = Env::new();
+    let r = e.hook_run("timeout 5 echo timeout_success");
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.stdout.contains("timeout_success"), "{}", r.stdout);
+}
+
+#[test]
+fn timeout_builtin_expires_exit_124() {
+    let e = Env::new();
+    let r = e.hook_run("timeout 0.1 sleep 2");
+    assert_eq!(r.code, 124, "stdout={} stderr={}", r.stdout, r.stderr);
+}
+
+#[test]
+fn timeout_builtin_preserve_status() {
+    let e = Env::new();
+    let r = e.hook_run("timeout --preserve-status 0.1 sleep 2");
+    // Default signal is SIGTERM (15). 128 + 15 = 143.
+    assert_eq!(r.code, 143, "stdout={} stderr={}", r.stdout, r.stderr);
+}
+
+#[test]
+fn timeout_builtin_missing_operand_exit_125() {
+    let e = Env::new();
+    let r = e.hook_run("timeout");
+    assert_eq!(r.code, 125, "stdout={} stderr={}", r.stdout, r.stderr);
+    assert!(r.stderr.contains("missing operand"), "{}", r.stderr);
+}
+
+#[test]
+fn timeout_builtin_chained_command() {
+    let e = Env::new();
+    let r = e.hook_run("echo step1; timeout 10 echo step2");
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.stdout.contains("step1"), "{}", r.stdout);
+    assert!(r.stdout.contains("step2"), "{}", r.stdout);
+}
+

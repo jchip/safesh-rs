@@ -45,6 +45,9 @@ impl Context {
         session_id: Option<&str>,
         grant: impl FnOnce(&mut Config),
     ) -> Result<Self, String> {
+        if base_cwd == Path::new("/") {
+            return Err("running in root directory '/' is not allowed".into());
+        }
         let mut loaded =
             load_session_config(base_cwd, session_id, &host).map_err(|e| e.to_string())?;
         grant(&mut loaded.config);

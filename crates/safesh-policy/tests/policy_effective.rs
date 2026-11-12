@@ -179,3 +179,10 @@ fn pd_36_explicit_write_elsewhere_still_denies_root() {
     let e = effective_permissions(&c, Path::new("/project"), &f.host);
     assert!(has(&e.deny_write, "/project"));
 }
+
+#[test]
+fn perm_root_cwd_not_in_default_read() {
+    let f = fx();
+    let e = effective_permissions(&Config::default(), Path::new("/"), &f.host);
+    assert!(!has(&e.read, "/"));
+}

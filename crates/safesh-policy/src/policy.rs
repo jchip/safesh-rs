@@ -83,7 +83,11 @@ pub fn effective_permissions(config: &Config, cwd: &Path, host: &HostEnv) -> Eff
     let perms = config.permissions.clone().unwrap_or_default();
     let temp = compute_temp_dir_defaults(host.tmpdir.as_deref().and_then(Path::to_str));
 
-    let mut read = vec![cwd.to_string_lossy().into_owned()];
+    let mut read = if cwd == Path::new("/") {
+        Vec::new()
+    } else {
+        vec![cwd.to_string_lossy().into_owned()]
+    };
     read.extend(temp.iter().cloned());
     if config.include_home_in_default_read != Some(false) {
         read.push(host.home.to_string_lossy().into_owned());

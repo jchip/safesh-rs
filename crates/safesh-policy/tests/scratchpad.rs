@@ -2,7 +2,7 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::os::unix::fs::{DirBuilderExt, symlink};
+use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 
 use safesh_policy::scratchpad::*;
@@ -89,36 +89,26 @@ fn sp_9_slash_in_sid() {
     ));
 }
 
-/// Real `/tmp/claude-<uid>` is required: the trust rule hardcodes that root.
 struct Fixture {
-    proj: PathBuf,
+    root: tempfile::TempDir,
+    _proj: PathBuf,
     pad: PathBuf,
     outside: tempfile::TempDir,
     sid: String,
     uid: u32,
 }
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.proj);
-    }
-}
 
 fn fixture(tag: &str) -> Fixture {
     let uid = rustix::process::getuid().as_raw();
-    let root = PathBuf::from(format!("/tmp/claude-{uid}"));
-    // Tests run in parallel, so another test may create it between check and create.
-    match fs::DirBuilder::new().mode(0o700).create(&root) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(e) => panic!("{}: {e}", root.display()),
-    }
+    let root = tempfile::TempDir::new().unwrap();
     let sid = format!("safesh-test-{tag}-{}", std::process::id());
-    let proj = root.join(&sid);
+    let proj = root.path().join(&sid);
     let pad = proj.join(&sid).join("scratchpad");
     fs::create_dir_all(&pad).unwrap();
     fs::write(pad.join("run.sh"), "echo").unwrap();
     Fixture {
-        proj,
+        root,
+        _proj: proj,
         pad,
         outside: tempfile::TempDir::new().unwrap(),
         sid,
@@ -133,14 +123,15 @@ fn sp_10_existing_script() {
     fs::write(&out_file, "x").unwrap();
     symlink(&out_file, f.pad.join("link.sh")).unwrap();
     let p = |n: &str| f.pad.join(n).to_string_lossy().into_owned();
-    let (sid, uid) = (Some(f.sid.as_str()), Some(f.uid));
-    assert!(is_session_scratchpad_script(&p("run.sh"), sid, uid));
-    assert!(!is_session_scratchpad_script(&p("missing.sh"), sid, uid));
-    assert!(!is_session_scratchpad_script(&p("link.sh"), sid, uid));
-    assert!(!is_session_scratchpad_script(
+    let (sid, uid, root) = (Some(f.sid.as_str()), Some(f.uid), f.root.path());
+    assert!(is_session_scratchpad_script_in(&p("run.sh"), sid, uid, root));
+    assert!(!is_session_scratchpad_script_in(&p("missing.sh"), sid, uid, root));
+    assert!(!is_session_scratchpad_script_in(&p("link.sh"), sid, uid, root));
+    assert!(!is_session_scratchpad_script_in(
         &p("run.sh"),
         Some("other-session"),
-        uid
+        uid,
+        root
     ));
 }
 
@@ -149,22 +140,25 @@ fn sp_11_new_script() {
     let f = fixture("sp11");
     symlink(f.outside.path(), f.pad.join("out")).unwrap();
     let p = |n: &str| f.pad.join(n).to_string_lossy().into_owned();
-    let (sid, uid) = (Some(f.sid.as_str()), Some(f.uid));
-    assert!(is_new_session_scratchpad_script(&p("new.sh"), sid, uid));
-    assert!(is_new_session_scratchpad_script(
+    let (sid, uid, root) = (Some(f.sid.as_str()), Some(f.uid), f.root.path());
+    assert!(is_new_session_scratchpad_script_in(&p("new.sh"), sid, uid, root));
+    assert!(is_new_session_scratchpad_script_in(
         &p("sub/dir/new.sh"),
         sid,
-        uid
+        uid,
+        root
     ));
-    assert!(!is_new_session_scratchpad_script(&p("run.sh"), sid, uid));
-    assert!(!is_new_session_scratchpad_script(
+    assert!(!is_new_session_scratchpad_script_in(&p("run.sh"), sid, uid, root));
+    assert!(!is_new_session_scratchpad_script_in(
         &p("out/new.sh"),
         sid,
-        uid
+        uid,
+        root
     ));
-    assert!(!is_new_session_scratchpad_script(
+    assert!(!is_new_session_scratchpad_script_in(
         &p("new.sh"),
         Some("other-session"),
-        uid
+        uid,
+        root
     ));
 }

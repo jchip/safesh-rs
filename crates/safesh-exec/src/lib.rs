@@ -5,6 +5,7 @@
 //! A denial prints the gate's message and stops the whole run with status 126.
 
 mod args;
+mod builtin_timeout;
 mod shebang;
 
 use std::io::{self, Write as _};
@@ -263,6 +264,10 @@ pub async fn run(config: RunConfig, gate: Arc<dyn Gate>) -> Result<u8, ExecError
         .shell_name(args.shell_name.clone())
         .shell_args(positional.clone())
         .default_builtins(BuiltinSet::BashMode)
+        .builtin(
+            "timeout",
+            brush_core::builtins::Registration::of::<builtin_timeout::TimeoutCommand>(),
+        )
         .build()
         .await
         .map_err(|e| ExecError::Setup(e.to_string()))?;
@@ -286,6 +291,13 @@ pub async fn run(config: RunConfig, gate: Arc<dyn Gate>) -> Result<u8, ExecError
             shell.run_dash_c_command(text).await
         }
     };
+    if !shell.jobs().jobs.is_empty() {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            shell.jobs_mut().wait_all(),
+        )
+        .await;
+    }
     match result {
         Ok(r) => Ok(u8::from(r.exit_code)),
         Err(e) => {
