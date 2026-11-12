@@ -255,14 +255,13 @@ pub async fn run(config: RunConfig, gate: Arc<dyn Gate>) -> Result<u8, ExecError
             nested_env,
         })),
     };
-    let positional = args.positional.clone();
     let mut shell = brush_core::Shell::builder_with_extensions::<Extensions>()
         .process_launcher(launcher)
         .profile(brush_core::ProfileLoadBehavior::Skip)
         .rc(brush_core::RcLoadBehavior::Skip)
         .command_string_mode(args.command.is_some())
         .shell_name(args.shell_name.clone())
-        .shell_args(positional.clone())
+        .shell_args(args.positional.clone())
         .default_builtins(BuiltinSet::BashMode)
         .builtin(
             "timeout",
@@ -283,7 +282,11 @@ pub async fn run(config: RunConfig, gate: Arc<dyn Gate>) -> Result<u8, ExecError
 
     let result = match (&args.command, &args.script) {
         (Some(cmd), _) => shell.run_dash_c_command(cmd.clone()).await,
-        (None, Some(script)) => shell.run_script(script, positional.iter().cloned()).await,
+        (None, Some(script)) => {
+            shell
+                .run_script(script, args.positional.iter().cloned())
+                .await
+        }
         (None, None) => {
             let mut text = String::new();
             io::Read::read_to_string(&mut io::stdin(), &mut text)

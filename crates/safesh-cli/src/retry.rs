@@ -200,13 +200,13 @@ pub fn retry_path(id: &str, choice: &str) -> u8 {
     let path = PathBuf::from(&p.path);
     let target = if c.dir {
         if path.is_dir() {
-            path.clone()
+            path
         } else {
             path.parent()
                 .map_or_else(|| path.clone(), Path::to_path_buf)
         }
     } else {
-        path.clone()
+        path
     };
     let target = target.to_string_lossy().into_owned();
     let read: Vec<String> = if c.read || p.operation == PathOperation::Read && !c.write {
@@ -214,11 +214,7 @@ pub fn retry_path(id: &str, choice: &str) -> u8 {
     } else {
         Vec::new()
     };
-    let write: Vec<String> = if c.write {
-        vec![target.clone()]
-    } else {
-        Vec::new()
-    };
+    let write: Vec<String> = if c.write { vec![target] } else { Vec::new() };
     let cwd = PathBuf::from(&p.cwd);
     let session = p.session_id.as_deref();
     let saved = save_path_grant(&host, &read, &write, &cwd, session, c.scope);

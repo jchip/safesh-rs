@@ -18,7 +18,7 @@ use deno_permissions::{
     RuntimePermissionDescriptorParser,
 };
 
-use crate::config::Config;
+use crate::config::{Config, PermissionsConfig};
 use crate::effect::{Access, Decision, Reason, Request};
 use crate::host::HostEnv;
 use crate::paths::{
@@ -102,7 +102,7 @@ pub fn effective_permissions(config: &Config, cwd: &Path, host: &HostEnv) -> Eff
         write.push(dir);
     }
 
-    let mut deny_write = perms.deny_write.clone().unwrap_or_default();
+    let mut deny_write = perms.deny_write.unwrap_or_default();
     let roots = workspace_roots(config, host);
     if !roots.is_empty() {
         read.extend(roots.iter().cloned());
@@ -187,7 +187,8 @@ impl Policy {
         opts: &PolicyOptions,
     ) -> Result<Self, PolicyError> {
         let workspace = workspace_variable(config, cwd, host);
-        let perms = config.permissions.clone().unwrap_or_default();
+        let no_perms = PermissionsConfig::default();
+        let perms = config.permissions.as_ref().unwrap_or(&no_perms);
         let block = config.block_project_dir_write == Some(true);
         let roots = workspace_roots(config, host);
         let abs = |list: &[String]| -> Vec<PathBuf> {

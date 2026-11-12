@@ -54,7 +54,7 @@ fn perm_6_tmpdir_snapshot_is_host_env() {
 )]
 fn perm_9_path_dirs_in_default_read() {
     let f = fx();
-    let mut host = f.host.clone();
+    let mut host = f.host;
     host.path = Some(OsString::from("/opt/a/bin:/opt/b/bin/:relative:/opt/a/bin"));
     let e = effective_permissions(&Config::default(), Path::new("/test/project"), &host);
     assert!(has(&e.read, "/opt/a/bin"));
@@ -65,7 +65,7 @@ fn perm_9_path_dirs_in_default_read() {
 #[test]
 fn perm_10_path_dirs_can_be_excluded() {
     let f = fx();
-    let mut host = f.host.clone();
+    let mut host = f.host;
     host.path = Some(OsString::from("/usr/bin:/bin"));
     let c = Config {
         project_dir: Some("/test/project".into()),

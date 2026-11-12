@@ -63,6 +63,7 @@ pub fn merge_configs(base: &Config, over: &Config) -> Config {
     let pick = |b: &Option<String>, o: &Option<String>| o.clone().or_else(|| b.clone());
     let mut extra = base.extra.clone();
     extra.extend(over.extra.clone());
+    let (no_perms, no_env) = (PermissionsConfig::default(), EnvConfig::default());
     Config {
         workspace: pick(&base.workspace, &over.workspace),
         workspace_dir: pick(&base.workspace_dir, &over.workspace_dir),
@@ -84,19 +85,22 @@ pub fn merge_configs(base: &Config, over: &Config) -> Config {
         passthrough_analyzable: over.passthrough_analyzable.or(base.passthrough_analyzable),
         timeout: over.timeout.or(base.timeout),
         permissions: Some(merge_permissions(
-            &base.permissions.clone().unwrap_or_default(),
-            &over.permissions.clone().unwrap_or_default(),
+            base.permissions.as_ref().unwrap_or(&no_perms),
+            over.permissions.as_ref().unwrap_or(&no_perms),
         )),
         env: Some(merge_env(
-            &base.env.clone().unwrap_or_default(),
-            &over.env.clone().unwrap_or_default(),
+            base.env.as_ref().unwrap_or(&no_env),
+            over.env.as_ref().unwrap_or(&no_env),
         )),
         approval: match (&base.approval, &over.approval) {
             (None, None) => None,
-            (b, o) => Some(merge_approval(
-                &b.clone().unwrap_or_default(),
-                &o.clone().unwrap_or_default(),
-            )),
+            (b, o) => {
+                let none = ApprovalConfig::default();
+                Some(merge_approval(
+                    b.as_ref().unwrap_or(&none),
+                    o.as_ref().unwrap_or(&none),
+                ))
+            }
         },
         // Rules only accumulate, so a project can't drop a global deny.
         rules: match (&base.rules, &over.rules) {

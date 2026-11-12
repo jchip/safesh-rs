@@ -424,7 +424,7 @@ impl<'a> Walker<'a> {
         }
         let before = (self.cwd.clone(), self.ocwd.clone());
         run(self);
-        if dynamic && (self.cwd.clone(), self.ocwd.clone()) != before {
+        if dynamic && (self.cwd != before.0 || self.ocwd != before.1) {
             self.invalidate_cwd();
         }
         for n in &assigned {
@@ -684,9 +684,9 @@ impl<'a> Walker<'a> {
         let function = !bypass_fn && self.out.functions.contains(&name);
         let builtin = !function && !as_exec && is_builtin(&name);
         if function {
-            if let Some(a) = self.fn_assigns.get(&name).cloned() {
+            if let Some(a) = self.fn_assigns.get(&name) {
                 for n in a {
-                    self.vars_set_unknown(&n);
+                    self.vars.insert(n.clone(), None);
                 }
             }
             if self.cwd_fns.contains(&name) {
@@ -774,8 +774,7 @@ impl<'a> Walker<'a> {
                 _ => self.lose_cwd(),
             },
             Some(Word::Known(p)) if p != "-" => {
-                let p = p.clone();
-                self.set_cwd(&p);
+                self.set_cwd(p);
             }
             Some(_) => self.lose_cwd(),
         }
