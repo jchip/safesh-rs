@@ -30,11 +30,15 @@ pub struct TimeoutCommand {
 }
 
 fn default_signal() -> TrapSignal {
-    "TERM".parse::<TrapSignal>().expect("TERM is a valid signal")
+    "TERM"
+        .parse::<TrapSignal>()
+        .expect("TERM is a valid signal")
 }
 
 fn kill_signal() -> TrapSignal {
-    "KILL".parse::<TrapSignal>().expect("KILL is a valid signal")
+    "KILL"
+        .parse::<TrapSignal>()
+        .expect("KILL is a valid signal")
 }
 
 impl TimeoutCommand {
@@ -364,11 +368,7 @@ impl<SE: brush_core::ShellExtensions> brush_core::builtins::Builtin<SE> for Time
                             .unwrap_or_else(|| Duration::from_millis(500));
                         if tokio::time::timeout(grace, child.wait()).await.is_err() {
                             if let Some(pid) = pid {
-                                kill_child(
-                                    pid,
-                                    pgid,
-                                    kill_signal(),
-                                );
+                                kill_child(pid, pgid, kill_signal());
                             }
                             let _ = tokio::time::timeout(Duration::from_millis(500), child.wait())
                                 .await;

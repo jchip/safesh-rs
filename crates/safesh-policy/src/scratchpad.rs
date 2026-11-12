@@ -245,7 +245,9 @@ pub fn is_session_scratchpad_script(
     }
     #[cfg(windows)]
     {
-        let Some(root) = windows_claude_root() else { return false };
+        let Some(root) = windows_claude_root() else {
+            return false;
+        };
         is_session_scratchpad_script_in(path, session_id, uid, Path::new(root))
     }
     #[cfg(not(any(unix, windows)))]
@@ -271,7 +273,9 @@ pub fn is_new_session_scratchpad_script(
     }
     #[cfg(windows)]
     {
-        let Some(root) = windows_claude_root() else { return false };
+        let Some(root) = windows_claude_root() else {
+            return false;
+        };
         is_new_session_scratchpad_script_in(path, session_id, uid, Path::new(root))
     }
     #[cfg(not(any(unix, windows)))]

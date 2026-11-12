@@ -124,9 +124,24 @@ fn sp_10_existing_script() {
     symlink(&out_file, f.pad.join("link.sh")).unwrap();
     let p = |n: &str| f.pad.join(n).to_string_lossy().into_owned();
     let (sid, uid, root) = (Some(f.sid.as_str()), Some(f.uid), f.root.path());
-    assert!(is_session_scratchpad_script_in(&p("run.sh"), sid, uid, root));
-    assert!(!is_session_scratchpad_script_in(&p("missing.sh"), sid, uid, root));
-    assert!(!is_session_scratchpad_script_in(&p("link.sh"), sid, uid, root));
+    assert!(is_session_scratchpad_script_in(
+        &p("run.sh"),
+        sid,
+        uid,
+        root
+    ));
+    assert!(!is_session_scratchpad_script_in(
+        &p("missing.sh"),
+        sid,
+        uid,
+        root
+    ));
+    assert!(!is_session_scratchpad_script_in(
+        &p("link.sh"),
+        sid,
+        uid,
+        root
+    ));
     assert!(!is_session_scratchpad_script_in(
         &p("run.sh"),
         Some("other-session"),
@@ -141,14 +156,24 @@ fn sp_11_new_script() {
     symlink(f.outside.path(), f.pad.join("out")).unwrap();
     let p = |n: &str| f.pad.join(n).to_string_lossy().into_owned();
     let (sid, uid, root) = (Some(f.sid.as_str()), Some(f.uid), f.root.path());
-    assert!(is_new_session_scratchpad_script_in(&p("new.sh"), sid, uid, root));
+    assert!(is_new_session_scratchpad_script_in(
+        &p("new.sh"),
+        sid,
+        uid,
+        root
+    ));
     assert!(is_new_session_scratchpad_script_in(
         &p("sub/dir/new.sh"),
         sid,
         uid,
         root
     ));
-    assert!(!is_new_session_scratchpad_script_in(&p("run.sh"), sid, uid, root));
+    assert!(!is_new_session_scratchpad_script_in(
+        &p("run.sh"),
+        sid,
+        uid,
+        root
+    ));
     assert!(!is_new_session_scratchpad_script_in(
         &p("out/new.sh"),
         sid,

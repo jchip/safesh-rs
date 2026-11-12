@@ -194,7 +194,8 @@ fn root_directory_not_allowed() {
     let r = Run::of(&o);
     assert_ne!(r.code, 0);
     assert!(
-        r.stderr.contains("running in root directory '/' is not allowed"),
+        r.stderr
+            .contains("running in root directory '/' is not allowed"),
         "stderr: {}",
         r.stderr
     );
@@ -239,4 +240,3 @@ fn timeout_builtin_chained_command() {
     assert!(r.stdout.contains("step1"), "{}", r.stdout);
     assert!(r.stdout.contains("step2"), "{}", r.stdout);
 }
-
