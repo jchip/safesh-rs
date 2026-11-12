@@ -1406,7 +1406,12 @@ mod tests {
         )
         .unwrap();
 
-        let mut env = Env::default();
+        // A HOME without `.toa`, so a real `~/.toa/runtime.json` on this machine is not read.
+        let mut no_toa = Env::default();
+        no_toa
+            .vars
+            .insert("HOME".into(), td.path().to_string_lossy().into());
+        let mut env = no_toa.clone();
         env.vars.insert(
             "TOA_API_DISCOVERY".into(),
             runtime_file.to_string_lossy().into(),
@@ -1418,7 +1423,7 @@ mod tests {
         assert_eq!(disco.gateway_url, "http://127.0.0.1:45123");
         assert_eq!(disco.hook_token, "tok-from-file");
 
-        let disco_none = discover_toa(None);
+        let disco_none = with_test_env(no_toa, || discover_toa(None));
         assert!(disco_none.is_none());
     }
 
