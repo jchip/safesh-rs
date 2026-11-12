@@ -31,7 +31,7 @@ fn approval_missing_block_gives_defaults() {
     assert!(c.approval.is_none());
     let r = ApprovalConfig::resolved(c.approval.as_ref());
     assert_eq!(r.channels, s(&["toa", "ask", "tmux", "gui"]));
-    assert_eq!(r.timeout, Duration::from_secs(60));
+    assert_eq!(r.timeout, Duration::from_secs(300));
     assert_eq!(r.runtime_timeout, Duration::from_secs(45));
 }
 
@@ -56,7 +56,7 @@ fn approval_empty_channels_stay_empty() {
     let c: Config = serde_json::from_str(r#"{"approval":{"channels":[]}}"#).unwrap();
     let r = ApprovalConfig::resolved(c.approval.as_ref());
     assert!(r.channels.is_empty());
-    assert_eq!(r.timeout, Duration::from_secs(60));
+    assert_eq!(r.timeout, Duration::from_secs(300));
 }
 
 #[test]

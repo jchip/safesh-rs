@@ -81,7 +81,7 @@ pub struct ResolvedApproval {
 }
 
 impl ApprovalConfig {
-    pub const DEFAULT_TIMEOUT_SEC: u64 = 60;
+    pub const DEFAULT_TIMEOUT_SEC: u64 = 300;
     pub const DEFAULT_RUNTIME_TIMEOUT_SEC: u64 = 45;
 
     /// Concrete values, using defaults for anything unset.

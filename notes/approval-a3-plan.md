@@ -24,7 +24,7 @@ Hard denials (deny lists, deny rules) never ask. Session without a session id be
 
 ## Time budget
 
-- `show` is `approval.timeoutSec` (60 s).
+- `show` is `approval.timeoutSec` (300 s).
 - `give_up_at` is now plus the hook budget: `--budget-sec` on the hook command.
 - `safesh install` sets the hook timeout to 600 s and adds `--budget-sec 590`.
 - Without the flag: 590 s for Claude (its default hook timeout is 600 s), and 25 s for Codex and agy (old installs set 30 s). Old installs keep working, just with shorter prompts until reinstalled.

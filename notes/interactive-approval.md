@@ -125,7 +125,7 @@ Limits:
 {
   "approval": {
     "channels": ["ask", "tmux", "gui"],
-    "timeoutSec": 60,
+    "timeoutSec": 300,
     "runtimeTimeoutSec": 45
   }
 }
@@ -152,4 +152,4 @@ Limits:
 1. ~~Default `channels`~~: `["ask", "tmux", "gui"]`, approved 2026-11-06.
 2. ~~"ask" replay risk~~: acceptable. The spike showed the model never sees the token.
 3. ~~Popup scopes~~: all five, approved 2026-11-06.
-4. ~~Prompt timeouts~~: 60 s at the pre-check and 45 s at runtime, approved 2026-11-06. safesh enforces them with its own timer for every channel.
+4. ~~Prompt timeouts~~: 300 s at the pre-check (raised from 60 s on 2026-11-12) and 45 s at runtime. safesh enforces them with its own timer for every channel.
