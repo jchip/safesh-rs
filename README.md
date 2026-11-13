@@ -60,7 +60,7 @@ Add `--dry-run` to print the change without writing it. The installer replaces a
 
 ## Debugging
 
-When a command seems stuck, run `safesh status`. A hook may be waiting on an approval prompt nobody sees, or a run may be on a child exec. Then run `safesh log --id <id>` for one script, or `safesh log -f` to follow.
+When a command seems stuck, run `safesh status`. A hook may be waiting on an approval prompt nobody sees, or a run may be on a child exec. Then run `safesh log --id <id>` for one script, or `safesh log -f` to follow. Set `SAFESH_DEBUG=1` to also print each event to stderr as it happens.
 
 ```
 PID    KIND  AGE    ID                SESSION   NOW

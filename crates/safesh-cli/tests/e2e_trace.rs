@@ -150,3 +150,43 @@ fn log_missing_day() {
         r.stderr
     );
 }
+
+/// Runs the hook for `cmd`, with `SAFESH_DEBUG` set when `debug` is given.
+fn hook_stderr(e: &Env, cmd: &str, debug: Option<&str>) -> String {
+    use std::io::Write as _;
+    let mut c = e.safesh(&["hook", "claude"]);
+    if let Some(v) = debug {
+        c.env("SAFESH_DEBUG", v);
+    }
+    let mut child = c
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn hook");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(e.input(cmd, "s1").as_bytes())
+        .unwrap();
+    let o = child.wait_with_output().unwrap();
+    assert_eq!(o.status.code(), Some(0));
+    String::from_utf8_lossy(&o.stderr).into_owned()
+}
+
+#[test]
+fn debug_echoes_events_to_stderr() {
+    let e = Env::new();
+    let err = hook_stderr(&e, "echo hi", Some("1"));
+    assert!(err.contains("[safesh] "), "{err}");
+    assert!(err.contains("hook.decision"), "{err}");
+    assert!(err.contains("hook.end"), "{err}");
+}
+
+#[test]
+fn no_echo_without_debug() {
+    let e = Env::new();
+    assert!(!hook_stderr(&e, "echo hi", None).contains("[safesh]"));
+    assert!(!hook_stderr(&e, "echo hi", Some("0")).contains("[safesh]"));
+}

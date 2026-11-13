@@ -2,7 +2,8 @@
 //!
 //! Each hook, run, retry and nested shell adds JSON lines to `<state>/log/<date>.jsonl`.
 //! While one is in progress, `<state>/active/<pid>.json` says what it is doing right now.
-//! `safesh status` reads the active files and `safesh log` reads the log.
+//! `safesh status` reads the active files and `safesh log` reads the log. With
+//! `SAFESH_DEBUG=1`, each event is also printed to stderr.
 //!
 //! Tracing never fails a command: every write error is ignored.
 
@@ -26,6 +27,8 @@ struct Tracer {
     kind: &'static str,
     started: Instant,
     started_at: String,
+    /// `SAFESH_DEBUG=1`: also print each event to stderr.
+    echo: bool,
     inner: Mutex<Inner>,
 }
 
@@ -84,6 +87,7 @@ pub fn start(
         .map(|c| c.to_string_lossy().into_owned());
     let t = Tracer {
         state_dir: state_dir.to_path_buf(),
+        echo: std::env::var("SAFESH_DEBUG").is_ok_and(|v| v == "1"),
         kind,
         started: Instant::now(),
         started_at: now_local(),
@@ -144,7 +148,11 @@ pub fn event(ev: &str, fields: Value) {
     if let Value::Object(f) = fields {
         line.extend(f.into_iter().filter(|(_, v)| !v.is_null()));
     }
-    let _ = append(&t.state_dir, &Value::Object(line));
+    let line = Value::Object(line);
+    if t.echo {
+        eprintln!("[safesh] {}", format_line(&line));
+    }
+    let _ = append(&t.state_dir, &line);
 }
 
 fn append(state_dir: &Path, line: &Value) -> std::io::Result<()> {
