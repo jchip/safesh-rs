@@ -41,6 +41,8 @@ pub trait Gate: Send + Sync {
     /// Whether `program` (absolute) is a script the engine must run itself when its `#!` names
     /// a shell, instead of letting the kernel start that shell outside the gate.
     fn runs_in_engine(&self, program: &Path, cwd: &Path) -> bool;
+    /// Called with the pid of each child right after it starts.
+    fn spawned(&self, _pid: i32) {}
 }
 
 /// Settings shared by every launch in one run.
@@ -203,7 +205,11 @@ impl ProcessLauncher for PolicyLauncher {
     fn spawn(&self, mut request: LaunchRequest) -> Result<ChildProcess, io::Error> {
         self.check_exec(&request)?;
         self.reroute_shell(&mut request);
-        DefaultProcessLauncher.spawn(request)
+        let child = DefaultProcessLauncher.spawn(request)?;
+        if let (Ok(ctx), Some(pid)) = (self.ctx(), child.pid()) {
+            ctx.gate.spawned(pid);
+        }
+        Ok(child)
     }
 
     fn exec(&self, mut request: LaunchRequest) -> io::Error {

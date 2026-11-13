@@ -190,3 +190,61 @@ fn no_echo_without_debug() {
     assert!(!hook_stderr(&e, "echo hi", None).contains("[safesh]"));
     assert!(!hook_stderr(&e, "echo hi", Some("0")).contains("[safesh]"));
 }
+
+/// The script id in a hook rewrite: `... run --id <id> ...`.
+fn rewrite_id(command: &str) -> String {
+    let i = command.find("--id ").expect("no --id") + 5;
+    command[i..].split_whitespace().next().unwrap().to_string()
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn status_shows_child_and_output_file() {
+    let e = Env::new();
+    let h = e.hook("sleep 3");
+    assert_eq!(h.decision(), "allow", "{}", h.stdout);
+    let id = rewrite_id(&h.command());
+    let out = e.root.join("out.txt");
+    let mut run = e
+        .safesh(&["run", "--id", &id])
+        .stdout(std::fs::File::create(&out).unwrap())
+        .stderr(std::fs::File::create(&out).unwrap())
+        .spawn()
+        .expect("spawn run");
+    // Wait until the run has started its child.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let status = loop {
+        let s = e.run_safesh(&["status"]).stdout;
+        if s.contains("child=") || std::time::Instant::now() > deadline {
+            break s;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    let _ = run.kill();
+    let _ = run.wait();
+    assert!(status.contains("exec sleep 3"), "{status}");
+    assert!(status.contains("child="), "{status}");
+    let want = format!("output: {}", canon(&out).display());
+    assert!(status.contains(&want), "{status}");
+    assert!(!status.contains("stderr:"), "same file as stdout: {status}");
+}
+
+#[cfg(unix)]
+#[test]
+fn status_marks_an_exited_child() {
+    let e = Env::new();
+    let mut c = std::process::Command::new("true").spawn().unwrap();
+    let dead = c.id();
+    c.wait().unwrap();
+    let dir = e.state.join("active");
+    std::fs::create_dir_all(&dir).unwrap();
+    let me = std::process::id();
+    let v = serde_json::json!({
+        "pid": me, "kind": "run", "id": "abc123", "step": "exec make",
+        "started": "2026-01-01T00:00:00.000+00:00", "step_at": "2026-01-01T00:00:00.000+00:00",
+        "child": dead,
+    });
+    std::fs::write(dir.join(format!("{me}.json")), v.to_string()).unwrap();
+    let s = e.run_safesh(&["status"]).stdout;
+    assert!(s.contains(&format!("child={dead} (exited)")), "{s}");
+}

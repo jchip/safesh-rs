@@ -65,8 +65,11 @@ When a command seems stuck, run `safesh status`. A hook may be waiting on an app
 ```
 PID    KIND  AGE    ID                SESSION   NOW
 48213  hook  1m35s  3f9a1c0b7d2e4a68  a1b2c3d4  waiting for the user via tmux (1m35s)
-48377  run   12s    3f9a1c0b7d2e4a68  a1b2c3d4  exec cargo test (12s)
+48377  run   12s    3f9a1c0b7d2e4a68  a1b2c3d4  exec cargo test (12s) child=48390
+        output: /private/tmp/claude-502/.../tasks/bi45h7nee.output
 ```
+
+`child` is the pid of the process the current step started. It shows `(exited)` once that process is gone, which means the shell has moved on. `output` is the file the run's stdout writes to, when it is a regular file, so `tail -f` shows what the run printed so far. Claude Code writes Bash output to such a file. A separate `stderr` line appears when stderr goes elsewhere.
 
 Events go to `/tmp/safesh/log/<date>.jsonl` (JSONL, readable with jq). Live status is in `/tmp/safesh/active/<pid>.json`. Logs older than 7 days are removed. `SAFESH_STATE_DIR` replaces `/tmp/safesh`.
 

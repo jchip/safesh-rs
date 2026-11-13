@@ -198,6 +198,10 @@ impl Gate for PolicyGate {
         self.ctx.policy.is_agent_script(program, cwd)
     }
 
+    fn spawned(&self, pid: i32) {
+        trace::child(pid);
+    }
+
     fn check_open(&self, path: &Path, access: Access) -> Result<(), String> {
         let r = self.decide_open(path, access);
         if let Err(m) = &r {

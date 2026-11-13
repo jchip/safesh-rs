@@ -37,9 +37,14 @@ struct Inner {
     id: Option<String>,
     session: Option<String>,
     cwd: Option<String>,
+    /// Files that stdout and stderr write to, when they are regular files.
+    output: Option<String>,
+    stderr: Option<String>,
     /// What the process is doing now, and since when.
     step: String,
     step_at: String,
+    /// Pid of the child started for the current step.
+    child: Option<i32>,
     ended: bool,
 }
 
@@ -85,6 +90,14 @@ pub fn start(
     let cwd = std::env::current_dir()
         .ok()
         .map(|c| c.to_string_lossy().into_owned());
+    // A hook's stdout is its reply to the agent, not command output.
+    let (output, stderr) = if kind == "hook" {
+        (None, None)
+    } else {
+        let out = stdio_file(1);
+        let err = stdio_file(2).filter(|e| out.as_ref() != Some(e));
+        (out, err)
+    };
     let t = Tracer {
         state_dir: state_dir.to_path_buf(),
         echo: std::env::var("SAFESH_DEBUG").is_ok_and(|v| v == "1"),
@@ -95,8 +108,11 @@ pub fn start(
             id: id.map(str::to_string),
             session: session.map(str::to_string),
             cwd: cwd.clone(),
+            output: output.clone(),
+            stderr: stderr.clone(),
             step: "starting".into(),
             step_at: now_local(),
+            child: None,
             ended: false,
         }),
     };
@@ -106,6 +122,8 @@ pub fn start(
     let mut fields = fields;
     if let Value::Object(m) = &mut fields {
         m.insert("cwd".into(), cwd.into());
+        m.insert("output".into(), output.into());
+        m.insert("stderr".into(), stderr.into());
     }
     event(&format!("{kind}.start"), fields);
     write_active();
@@ -199,8 +217,42 @@ pub fn step(text: impl Into<String>) {
         let Ok(mut g) = t.inner.lock() else { return };
         g.step = text.into();
         g.step_at = now_local();
+        g.child = None;
     }
     write_active();
+}
+
+/// Records the child started for the current step.
+pub fn child(pid: i32) {
+    let Some(t) = TRACER.get() else { return };
+    {
+        let Ok(mut g) = t.inner.lock() else { return };
+        g.child = Some(pid);
+    }
+    write_active();
+}
+
+/// Path of the regular file that fd 1 or 2 writes to. `None` for a pipe, a tty, or when the
+/// platform can't tell.
+fn stdio_file(fd: i32) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    let path = if fd == 1 {
+        rustix::fs::getpath(std::io::stdout())
+    } else {
+        rustix::fs::getpath(std::io::stderr())
+    }
+    .ok()
+    .map(|c| c.to_string_lossy().into_owned());
+    #[cfg(target_os = "linux")]
+    let path = std::fs::read_link(format!("/proc/self/fd/{fd}"))
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let path: Option<String> = {
+        let _ = fd;
+        None
+    };
+    path.filter(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file()))
 }
 
 fn active_path(state_dir: &Path) -> PathBuf {
@@ -222,6 +274,9 @@ fn write_active() {
         "started": t.started_at,
         "step": g.step,
         "step_at": g.step_at,
+        "child": g.child,
+        "output": g.output,
+        "stderr": g.stderr,
     });
     drop(g);
     let dir = active_dir(&t.state_dir);
@@ -313,7 +368,16 @@ pub fn status(state_dir: &Path) -> u8 {
     for (v, alive) in &rows {
         let session: String = str_of(v, "session").chars().take(8).collect();
         let now = if *alive {
-            format!("{} ({})", str_of(v, "step"), age(str_of(v, "step_at")))
+            let mut s = format!("{} ({})", str_of(v, "step"), age(str_of(v, "step_at")));
+            if let Some(c) = v["child"].as_i64().and_then(|c| i32::try_from(c).ok()) {
+                let gone = if safesh_policy::compat::pid_alive(c) {
+                    ""
+                } else {
+                    " (exited)"
+                };
+                let _ = write!(s, " child={c}{gone}");
+            }
+            s
         } else {
             format!("gone without finishing; last step: {}", str_of(v, "step"))
         };
@@ -325,6 +389,11 @@ pub fn status(state_dir: &Path) -> u8 {
             str_of(v, "id"),
             session,
         );
+        for k in ["output", "stderr"] {
+            if let Some(p) = v[k].as_str() {
+                println!("        {k}: {p}");
+            }
+        }
     }
     0
 }
