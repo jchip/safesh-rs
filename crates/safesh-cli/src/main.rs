@@ -55,7 +55,7 @@ enum Cmd {
         #[arg(long)]
         pending: Option<String>,
     },
-    /// Nested shell entry: `bash`/`sh` re-routed by the runtime gate.
+    /// Nested shell entry: `bash`, `sh`, `dash` and `zsh` re-routed by the runtime gate.
     #[command(hide = true)]
     Shell {
         #[arg(long, default_value = "bash")]

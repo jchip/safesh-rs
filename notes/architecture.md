@@ -126,7 +126,7 @@ Costs and how we handle them:
 |---|---|
 | Exec | `PolicyLauncher` implements brush's `ProcessLauncher`. It is passed as an `Arc` through the shell builder. `LaunchRequest` gives the resolved program, argv0, expanded args, full env and cwd. |
 | Redirects and `source` | brush routes all of them through the private `Shell::open_file`. A 31-line patch adds a default `ProcessLauncher::check_open(path, write)` and calls it at 3 sites. It goes upstream as a PR. Until it lands, `vendor/brush-core` carries it, and a `[patch]` section points the pinned brush git source at that copy. |
-| Nested shells | The launcher rewrites a `bash`, `sh` or `dash` exec to `safesh shell <bash args>`, passing session, base cwd and script id through env. The child is a real process, so PIDs, fds and job control stay native. Cost is about 8 ms per nested shell. A shell started by a wrapper such as `env bash -c` is not re-routed, so it gets a normal run check. |
+| Nested shells | The launcher rewrites a `bash`, `sh`, `dash` or `zsh` exec to `safesh shell <bash args>`. A zsh script is expected to be bash and runs as bash, passing session, base cwd and script id through env. The child is a real process, so PIDs, fds and job control stay native. Cost is about 8 ms per nested shell. A shell started by a wrapper such as `env bash -c` is not re-routed, so it gets a normal run check. |
 | Abort | A runtime deny prints the message, flushes stdout and exits 126. Pipeline stages see a closed pipe. A nested shell also sends SIGUSR1 to its parent safesh (`SAFESH_PARENT_PID`), which exits 126 the same way, so a denial anywhere stops the whole run. |
 | Builtins | brush's in-process coreutils builtins stay off, so file-changing tools are always real execs. |
 

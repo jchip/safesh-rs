@@ -3,16 +3,17 @@
 use std::io::Read as _;
 use std::path::Path;
 
-/// Whether `program` names `bash`, `sh` or `dash`. Windows: `bash.exe` is `bash`.
+/// Whether `program` names `bash`, `sh`, `dash` or `zsh`. A zsh script is expected to be bash
+/// and runs in the bash engine. Windows: `bash.exe` is `bash`.
 pub fn is_shell(program: &str) -> bool {
     matches!(
         safesh_policy::paths::command_name(program),
-        "bash" | "sh" | "dash"
+        "bash" | "sh" | "dash" | "zsh"
     )
 }
 
-/// The shell and its options from `path`'s `#!` line, when that line starts `bash`, `sh` or
-/// `dash`, directly or through `env`.
+/// The shell and its options from `path`'s `#!` line, when that line starts a shell that
+/// `is_shell` accepts, directly or through `env`.
 pub fn shell_shebang(path: &Path) -> Option<(String, Vec<String>)> {
     let mut head = Vec::new();
     std::fs::File::open(path)
@@ -61,11 +62,13 @@ mod tests {
         assert_eq!(p("#!/bin/sh\necho"), Some(shell("/bin/sh", &[])));
         assert_eq!(p("#! /bin/bash -e\r\n"), Some(shell("/bin/bash", &["-e"])));
         assert_eq!(p("#!/bin/dash -"), Some(shell("/bin/dash", &[])));
+        assert_eq!(p("#!/usr/bin/zsh\n"), Some(shell("/usr/bin/zsh", &[])));
     }
 
     #[test]
     fn through_env() {
         assert_eq!(p("#!/usr/bin/env bash\n"), Some(shell("bash", &[])));
+        assert_eq!(p("#!/usr/bin/env zsh\n"), Some(shell("zsh", &[])));
         assert_eq!(
             p("#!/usr/bin/env -S bash -eu\n"),
             Some(shell("bash", &["-eu"]))
@@ -75,7 +78,7 @@ mod tests {
     #[test]
     fn not_a_shell() {
         assert_eq!(p("#!/usr/bin/env python3\n"), None);
-        assert_eq!(p("#!/usr/bin/zsh\n"), None);
+        assert_eq!(p("#!/usr/bin/fish\n"), None);
         assert_eq!(p("echo no shebang\n"), None);
         assert_eq!(p(""), None);
         assert_eq!(p("#!\n"), None);

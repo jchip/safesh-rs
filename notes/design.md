@@ -107,7 +107,7 @@ Rules:
 | `find -exec/-execdir/-ok` | check the `-exec` argv; `{}` counts as a path under the search root |
 | `sudo`, `doas` | always `ask` |
 | `bash -c`, `sh -c`, `bash script.sh` | re-exec safesh as the child shell, so the payload hits the hook |
-| `./script.sh` with a `sh`/`bash`/`dash` `#!` | same re-exec, when the script is under the project roots or in the session scratchpad. Shell-script tools on PATH (a git wrapper, `brew`) run natively |
+| `./script.sh` with a `sh`/`bash`/`dash`/`zsh` `#!` | same re-exec, when the script is under the project roots or in the session scratchpad. Shell-script tools on PATH (a git wrapper, `brew`) run natively |
 | `ssh`, `docker exec`, `kubectl exec` | the command runs elsewhere; check the outer command only |
 
 The nested-shell trick only covers shells started by our engine. A shell started by a wrapper (`env bash -c`, `xargs sh -c`, `find -exec sh -c`) is a real exec outside safesh, so it gets a normal run check, and `bash` is not on the default allowlist. A `bash` started by `make` or `python` is outside the boundary (section 3).

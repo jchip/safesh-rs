@@ -1,5 +1,6 @@
 //! `.sh` scripts: they run, and the commands inside them are still checked. This holds for
 //! `bash s.sh`, `source`, and `./s.sh` through its `#!` line when the script is in the project.
+//! `zsh` is treated as `bash`: its script is expected to be bash and runs in the same engine.
 
 mod common;
 use common::*;
@@ -37,6 +38,43 @@ fn bash_script_runs_with_args() {
     let r = e.hook_run("bash s.sh hello; echo after");
     assert_eq!(r.code, 0, "{}", r.stderr);
     assert_eq!(r.stdout, "arg=hello\nafter\n");
+}
+
+/// A fake `zsh` on PATH: if it ever runs, the output says `RAN zsh`.
+fn env_with_fake_zsh() -> Env {
+    let e = Env::new();
+    let bin = e.outside.join("bin");
+    fake_tool(&bin, "zsh");
+    fake_tool(&bin, "deploy");
+    e.with_path_prefix(bin)
+}
+
+#[test]
+fn zsh_script_runs_as_bash() {
+    let e = env_with_fake_zsh();
+    script(&e, "s.sh", "a=(x y); echo \"arg=$1 first=${a[0]}\"\n");
+    let r = e.hook_run("zsh s.sh hello; echo after");
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert_eq!(r.stdout, "arg=hello first=x\nafter\n");
+}
+
+#[test]
+fn zsh_script_hidden_command_blocked() {
+    let e = env_with_fake_zsh();
+    script(&e, "s.sh", "x=$(echo deploy); $x; echo in2\n");
+    let r = e.hook_run("zsh s.sh; echo after");
+    assert_stopped(&r);
+    assert!(!r.stdout.contains("RAN"), "{}", r.stdout);
+}
+
+#[test]
+#[cfg_attr(windows, ignore = "#! scripts do not start on Windows")]
+fn zsh_shebang_script_runs_as_bash() {
+    let e = env_with_fake_zsh();
+    script(&e, "s.sh", "#!/usr/bin/env zsh\necho \"$0 arg=$1\"\n");
+    let r = e.hook_run("./s.sh hello");
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert_eq!(r.stdout, "./s.sh arg=hello\n");
 }
 
 #[test]

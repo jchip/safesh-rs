@@ -225,11 +225,12 @@ fn run(full: &[String], nested: bool) -> Out {
     };
     let name = base(prog);
     let args = &full[1..];
-    if nested || !matches!(name, "bash" | "sh" | "dash") {
+    if nested || !matches!(name, "bash" | "sh" | "dash" | "zsh") {
         out.items.push(Item::Run(prog.clone()));
     }
     let ok = match name {
-        "bash" | "sh" | "dash" => {
+        // zsh runs in the bash engine too; its script is expected to be bash.
+        "bash" | "sh" | "dash" | "zsh" => {
             shell(args, &mut out);
             Some(())
         }

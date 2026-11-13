@@ -68,6 +68,7 @@ fn shells_emit_no_run() {
     assert!(go(&["bash", "-c", "rm -rf /"]).is_empty());
     assert!(go(&["sh", "-c", "echo"]).is_empty());
     assert!(go(&["/bin/dash", "-c", "echo"]).is_empty());
+    assert!(go(&["zsh", "-c", "echo"]).is_empty());
 }
 
 #[test]
