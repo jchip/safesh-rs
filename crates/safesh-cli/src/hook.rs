@@ -22,7 +22,8 @@ use crate::context::Context;
 use crate::evaluate::{Evaluation, evaluate};
 use crate::gate::now_iso;
 use crate::retry::{Scope, save_command_grant, save_path_grant};
-use crate::{cache, messages, self_exe};
+use crate::{cache, messages, self_exe, trace};
+use serde_json::json;
 
 /// Single-quotes `s` for a POSIX shell.
 pub fn sh_quote(s: &str) -> String {
@@ -41,24 +42,18 @@ fn default_budget(agent: Agent) -> u64 {
     if agent == Agent::Claude { 590 } else { 25 }
 }
 
-pub fn run(agent: Agent, shadow: bool, budget_sec: Option<u64>) -> u8 {
-    fail_closed(agent, shadow, || run_inner(agent, shadow, budget_sec))
+pub fn run(agent: Agent, budget_sec: Option<u64>) -> u8 {
+    fail_closed(agent, || run_inner(agent, budget_sec))
 }
 
 /// Runs the hook body so that a panic cannot let the tool call through. A process that dies
 /// from a panic exits 101, which agents treat as "hook errored, carry on": the command would
 /// run unchecked. On a panic the agent gets its own deny output (not every agent blocks on a
-/// bare exit code); if even that fails, exit 2. Shadow mode never blocks, so it passes through.
-fn fail_closed(
-    agent: Agent,
-    shadow: bool,
-    body: impl FnOnce() -> u8 + std::panic::UnwindSafe,
-) -> u8 {
+/// bare exit code); if even that fails, exit 2.
+fn fail_closed(agent: Agent, body: impl FnOnce() -> u8 + std::panic::UnwindSafe) -> u8 {
     std::panic::catch_unwind(body).unwrap_or_else(|_| {
         eprintln!("safesh hook: internal error (panic); blocking the command");
-        if shadow {
-            return 0;
-        }
+        trace::event("error", json!({ "msg": "panic in the hook" }));
         let deny = Outcome::Deny {
             message: "[SAFESH] internal error in the hook; the command was blocked".to_string(),
         };
@@ -66,10 +61,11 @@ fn fail_closed(
     })
 }
 
-fn run_inner(agent: Agent, shadow: bool, budget_sec: Option<u64>) -> u8 {
+fn run_inner(agent: Agent, budget_sec: Option<u64>) -> u8 {
     let mut stdin = String::new();
     if let Err(e) = std::io::stdin().read_to_string(&mut stdin) {
         eprintln!("safesh hook: cannot read stdin: {e}");
+        trace::event("error", json!({ "msg": format!("cannot read stdin: {e}") }));
         return 2;
     }
     let input = match parse_input(agent, &stdin) {
@@ -78,33 +74,47 @@ fn run_inner(agent: Agent, shadow: bool, budget_sec: Option<u64>) -> u8 {
         // Fail closed: exit 2 blocks the tool call and shows stderr.
         Err(e) => {
             eprintln!("safesh hook: {e}");
+            trace::event("error", json!({ "msg": e.to_string() }));
             return 2;
         }
     };
+    trace::set_context(None, input.session_id.as_deref(), input.cwd.as_deref());
+    trace::event(
+        "hook.input",
+        json!({
+            "event": input.hook_event_name,
+            "hook_cwd": input.cwd,
+            "cmd": trace::preview(&input.command),
+        }),
+    );
+    trace::step("checking the command");
     if input.hook_event_name.as_deref() == Some("PermissionRequest") {
         return permission_request(&input);
     }
-    // Shadow mode only logs, so it never shows a prompt.
-    let budget =
-        (!shadow).then(|| Duration::from_secs(budget_sec.unwrap_or_else(|| default_budget(agent))));
+    let budget = Some(Duration::from_secs(
+        budget_sec.unwrap_or_else(|| default_budget(agent)),
+    ));
     let outcome = match decide(agent, &input, budget) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("safesh hook: {e}");
-            if shadow {
-                return emit(agent, Some(&input), &Outcome::Passthrough);
-            }
+            trace::event("error", json!({ "msg": e }));
             return 2;
         }
     };
-    if shadow {
-        log_shadow(agent, &input, &outcome);
-        return emit(agent, Some(&input), &Outcome::Passthrough);
-    }
     emit(agent, Some(&input), &outcome)
 }
 
 fn emit(agent: Agent, input: Option<&HookInput>, outcome: &Outcome) -> u8 {
+    let (decision, detail) = match outcome {
+        Outcome::Passthrough => ("passthrough", None),
+        Outcome::Rewrite { command } => ("rewrite", Some(command)),
+        Outcome::Deny { message } => ("deny", Some(message)),
+    };
+    trace::event(
+        "hook.decision",
+        json!({ "decision": decision, "detail": detail.map(|d| trace::preview(d)) }),
+    );
     let empty = HookInput::default();
     let r = format_output(agent, input.unwrap_or(&empty), outcome);
     if !r.stdout.is_empty() {
@@ -177,6 +187,7 @@ pub fn decide(
         }
     };
     let id = cache::store(&ctx.host, script)?;
+    trace::set_context(Some(&id), None, None);
     if ev.is_allowed() {
         return rewritten(agent, &ctx, &ev, &id, input, None);
     }
@@ -225,7 +236,22 @@ fn ask_user(ctx: &Context, ask: &Ask, budget: Duration) -> Option<Choice> {
         show: ctx.approval.timeout,
         give_up_at: Instant::now() + budget,
     };
-    approval::ask_user(&ctx.approval.channels, &env, &prompt, timing)
+    trace::event(
+        "approval.start",
+        json!({
+            "pending": ask.pending_id,
+            "channels": ctx.approval.channels,
+            "show_sec": ctx.approval.timeout.as_secs(),
+            "budget_sec": budget.as_secs(),
+        }),
+    );
+    let choice = approval::ask_user(&ctx.approval.channels, &env, &prompt, timing);
+    trace::event(
+        "approval.end",
+        json!({ "pending": ask.pending_id, "choice": choice.map(Choice::label) }),
+    );
+    trace::step("deciding");
+    choice
 }
 
 /// Applies the user's answer. Every allow also writes a once-grant, so this run can't block
@@ -434,34 +460,6 @@ fn block(ctx: &Context, ev: &Evaluation, id: &str, input: &HookInput) -> Blocked
     }
 }
 
-fn log_shadow(agent: Agent, input: &HookInput, outcome: &Outcome) {
-    let host = safesh_policy::host::HostEnv::from_process();
-    let (kind, detail) = match outcome {
-        Outcome::Passthrough => ("passthrough", String::new()),
-        Outcome::Rewrite { command } => ("rewrite", command.clone()),
-        Outcome::Deny { message } => ("deny", message.clone()),
-    };
-    let line = serde_json::json!({
-        "ts": now_iso(),
-        "agent": format!("{agent:?}"),
-        "cwd": input.cwd,
-        "command": input.command,
-        "decision": kind,
-        "detail": detail,
-    });
-    let path = host.state_dir.join("shadow.jsonl");
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        let _ = writeln!(f, "{line}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::sh_quote;
@@ -478,9 +476,8 @@ mod tests {
         // Keep the expected panic out of the test output.
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let claude = super::fail_closed(Agent::Claude, false, || panic!("boom"));
-        let agy = super::fail_closed(Agent::Agy, false, || panic!("boom"));
-        let shadow = super::fail_closed(Agent::Claude, true, || panic!("boom"));
+        let claude = super::fail_closed(Agent::Claude, || panic!("boom"));
+        let agy = super::fail_closed(Agent::Agy, || panic!("boom"));
         std::panic::set_hook(prev);
         // Each agent gets the exit code its own deny output uses.
         let deny = Outcome::Deny {
@@ -490,7 +487,6 @@ mod tests {
             |a| u8::try_from(format_output(a, &HookInput::default(), &deny).exit_code).unwrap();
         assert_eq!(claude, want(Agent::Claude));
         assert_eq!(agy, want(Agent::Agy));
-        assert_eq!(shadow, 0);
-        assert_eq!(super::fail_closed(Agent::Claude, false, || 0), 0);
+        assert_eq!(super::fail_closed(Agent::Claude, || 0), 0);
     }
 }

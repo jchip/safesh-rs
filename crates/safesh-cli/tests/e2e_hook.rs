@@ -95,22 +95,6 @@ fn non_bash_tool_passes_through() {
 }
 
 #[test]
-fn shadow_passes_through_and_logs() {
-    let e = Env::new();
-    let h = e.hook_raw(&["hook", "claude", "--shadow"], &e.input("echo hi", "s1"));
-    assert_eq!((h.code, h.stdout.as_str()), (0, ""));
-    let log = std::fs::read_to_string(e.state.join("shadow.jsonl")).expect("shadow.jsonl");
-    let line: serde_json::Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
-    assert_eq!(line["decision"], "rewrite");
-    assert_eq!(line["command"], "echo hi");
-    let h = e.hook_raw(&["hook", "claude", "--shadow"], &e.input("foobarbaz", "s1"));
-    assert_eq!(h.stdout, "");
-    let log = std::fs::read_to_string(e.state.join("shadow.jsonl")).unwrap();
-    assert_eq!(log.lines().count(), 2);
-    assert!(log.lines().nth(1).unwrap().contains("\"deny\""));
-}
-
-#[test]
 fn codex_rewrite_approval_consumed_once() {
     let e = Env::new();
     let h = e.hook_as("codex", "echo hi", "s1");
@@ -232,33 +216,26 @@ fn install_claude_dry_run_prints_and_writes_nothing() {
 }
 
 #[test]
-fn install_claude_shadow_next_to_ts_hook() {
+fn install_claude_replaces_ts_hook() {
     let e = Env::new();
     let p = e.home.join(".claude/settings.json");
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     let ts = r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"deno run hooks/bash-prehook.ts"}]}]}}"#;
     std::fs::write(&p, ts).unwrap();
     let r = e.run_safesh(&["install", "claude"]);
-    assert_eq!(r.code, 1, "{}", r.stdout);
-    assert_eq!(std::fs::read_to_string(&p).unwrap(), ts);
-    let r = e.run_safesh(&["install", "claude-shadow"]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(!text.contains("bash-prehook"), "{text}");
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
     let pre = v["hooks"]["PreToolUse"].as_array().unwrap();
-    assert_eq!(pre.len(), 2);
+    assert_eq!(pre.len(), 1);
     assert!(
         pre[0]["hooks"][0]["command"]
             .as_str()
             .unwrap()
-            .contains("bash-prehook")
+            .ends_with("hook claude --budget-sec 590")
     );
-    assert!(
-        pre[1]["hooks"][0]["command"]
-            .as_str()
-            .unwrap()
-            .ends_with("hook claude --shadow --budget-sec 590")
-    );
-    assert_eq!(pre[1]["hooks"][0]["timeout"], 600);
+    assert_eq!(pre[0]["hooks"][0]["timeout"], 600);
 }
 
 #[test]

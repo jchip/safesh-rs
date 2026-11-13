@@ -9,12 +9,14 @@ mod hook;
 mod install;
 mod messages;
 mod retry;
+mod trace;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
+use serde_json::json;
 
 use context::Context;
 use gate::PolicyGate;
@@ -36,9 +38,6 @@ enum Cmd {
     Hook {
         /// claude, gemini, codex or agy.
         agent: safesh_hooks::Agent,
-        /// Log the decision without acting on it.
-        #[arg(long)]
-        shadow: bool,
         /// Most seconds to wait for the user. `safesh install` sets it below the hook timeout.
         #[arg(long)]
         budget_sec: Option<u64>,
@@ -125,16 +124,88 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// List hooks and runs in progress, and what each is doing now.
+    Status,
+    /// Show the event log of hooks and runs.
+    Log {
+        /// Only events of this script or pending id (a prefix is enough).
+        #[arg(long)]
+        id: Option<String>,
+        /// Only events of this agent session (a prefix is enough).
+        #[arg(long)]
+        session: Option<String>,
+        /// Day to read, `YYYY-MM-DD`. Today by default.
+        #[arg(long)]
+        date: Option<String>,
+        /// How many of the last matching events to show.
+        #[arg(short = 'n', long, default_value_t = 40)]
+        lines: usize,
+        /// Keep printing new events as they come.
+        #[arg(short, long)]
+        follow: bool,
+    },
+}
+
+fn state_dir() -> PathBuf {
+    safesh_policy::host::HostEnv::from_process().state_dir
+}
+
+fn env_session() -> Option<String> {
+    std::env::var(context::ENV_SESSION).ok()
+}
+
+/// Starts the trace for commands that run or check scripts. Others are not traced.
+fn start_trace(cmd: &Cmd) {
+    let (kind, id, session, fields) = match cmd {
+        Cmd::Hook { agent, .. } => (
+            "hook",
+            None,
+            None,
+            json!({ "agent": format!("{agent:?}").to_lowercase() }),
+        ),
+        Cmd::Run {
+            id,
+            session,
+            background,
+            pending,
+        } => (
+            "run",
+            Some(id.clone()),
+            session.clone().or_else(env_session),
+            json!({ "background": background, "pending": pending }),
+        ),
+        Cmd::Shell { shell_name, args } => (
+            "shell",
+            std::env::var(context::ENV_SCRIPT).ok(),
+            env_session(),
+            json!({
+                "shell": shell_name,
+                "args": trace::preview(&args.join(" ")),
+                "parents": std::env::var("SAFESH_PARENT_PIDS").ok(),
+            }),
+        ),
+        Cmd::Retry { id, choice } | Cmd::RetryPath { id, choice } => (
+            "retry",
+            None,
+            None,
+            json!({ "pending": id, "choice": choice }),
+        ),
+        _ => return,
+    };
+    trace::start(
+        &state_dir(),
+        kind,
+        id.as_deref(),
+        session.as_deref(),
+        fields,
+    );
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    start_trace(&cli.cmd);
     let code = match cli.cmd {
-        Cmd::Hook {
-            agent,
-            shadow,
-            budget_sec,
-        } => hook::run(agent, shadow, budget_sec),
+        Cmd::Hook { agent, budget_sec } => hook::run(agent, budget_sec),
         Cmd::Run {
             id,
             session,
@@ -144,6 +215,23 @@ fn main() -> ExitCode {
         Cmd::Shell { shell_name, args } => shell(&shell_name, &args),
         Cmd::Retry { id, choice } => retry::retry(&id, &choice),
         Cmd::RetryPath { id, choice } => retry::retry_path(&id, &choice),
+        Cmd::Status => trace::status(&state_dir()),
+        Cmd::Log {
+            id,
+            session,
+            date,
+            lines,
+            follow,
+        } => trace::log(
+            &state_dir(),
+            &trace::LogQuery {
+                id,
+                session,
+                date,
+                lines,
+                follow,
+            },
+        ),
         Cmd::ApproveUi {
             id,
             state_dir,
@@ -184,11 +272,13 @@ fn main() -> ExitCode {
         Cmd::Check { script, session } => check(&script, session.as_deref()),
         Cmd::Install { agent, dry_run } => install::install(&agent, dry_run),
     };
+    trace::end(code);
     ExitCode::from(code)
 }
 
 fn fail(msg: &str) -> u8 {
     eprintln!("safesh: {msg}");
+    trace::event("error", json!({ "msg": msg }));
     1
 }
 
@@ -203,6 +293,7 @@ pub(crate) fn execute(
     script_id: Option<String>,
     background: bool,
 ) -> u8 {
+    trace::step("running the script");
     let nested_env = ctx.nested_env(script_id.as_deref());
     let gate = Arc::new(PolicyGate {
         ctx: Arc::new(ctx),

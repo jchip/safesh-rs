@@ -236,14 +236,6 @@ fn approval_off_gives_text_menu_without_tmux() {
 }
 
 #[test]
-fn shadow_never_asks() {
-    let t = T::new("1\n");
-    let h = t.hook_with(&["hook", "claude", "--shadow"], TOOL, "s1", &[]);
-    assert_eq!((h.code, h.stdout.as_str()), (0, ""));
-    assert_eq!(t.log(), "");
-}
-
-#[test]
 fn hard_denial_never_asks() {
     let t = T::new("1\n");
     t.e.write_global_config(

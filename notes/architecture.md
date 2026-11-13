@@ -70,7 +70,7 @@ In Deno, every op that touches the outside world makes one call to a shared `Per
 | **Effect** | Two kinds only: `Exec { program, argv, cwd, env }` and `Open { path, read \| write }`. |
 | **Interpret** | Turns an `Exec` into typed requests. `mv a ../b` becomes `Run(/bin/mv)`, `Write(a)` and `Write(../b)`. `xargs rm` becomes `Run(xargs)` and `Run(rm)`. Command knowledge lives only in the command-spec table and the wrapper rules. |
 | **Policy** | `check(&Request) -> Decision`. Path, run and env lists go through `deno_permissions`. Argv rules and session grants sit on top. |
-| **Responder** | One per mode, like Deno's `PermissionPrompter`. The hook emits deny-with-retry JSON. The runtime writes the pending file, prints `BLOCKED` and aborts. Shadow mode and tests record the decision. |
+| **Responder** | One per mode, like Deno's `PermissionPrompter`. The hook emits deny-with-retry JSON. The runtime writes the pending file, prints `BLOCKED` and aborts. Tests record the decision. |
 
 ### 3.1 Core types (sketch)
 
@@ -166,6 +166,8 @@ Planned modules in `safesh-policy`:
 | `safesh retry-path --id <id> --choice <...>` | approve a pending path, then run it |
 | `safesh check '<cmd>'` | show the pre-check result; for debugging |
 | `safesh install claude\|codex\|agy` | install hooks (ports today's installers) |
+| `safesh status` | list in-progress hooks and runs with age, id, session and current step |
+| `safesh log [--id P] [--session P] [--date D] [-n N] [-f]` | print or follow recent events from the event log |
 
 `desh` becomes an alias of `safesh` for one release, so pending retry hints in flight keep working.
 
@@ -179,7 +181,8 @@ Planned modules in `safesh-policy`:
 | Session grants | `<project>/.temp/safesh/session-<id>.json` | retry choice 3 |
 | Pending | `/tmp/safesh/pending/pending-<id>.json`, `pending-path-<id>.json` | hook and run on deny; 5-minute TTL |
 | Script cache | `/tmp/safesh/scripts/script-<id>.sh`, id = 16 hex of sha256 | hook, on allow and on deny (retry reruns it) |
-| Shadow log | `/tmp/safesh/shadow.jsonl` | `hook --shadow` |
+| Event log | `/tmp/safesh/log/<date>.jsonl` | hook, run, retry, shell; 7-day retention |
+| Active status | `/tmp/safesh/active/<pid>.json` | hook, run, retry, shell, while running |
 | Codex approvals | `/tmp/safesh/approvals/` | Codex hook; mode 0600 |
 
 `SAFESH_STATE_DIR` replaces `/tmp/safesh` for every state file.

@@ -10,6 +10,10 @@ use crate::hook::sh_quote;
 pub struct Tmux;
 
 impl Channel for Tmux {
+    fn name(&self) -> &'static str {
+        "tmux"
+    }
+
     fn available(&self, env: &Env) -> bool {
         let (Some(_), Some(pane), Some(tmux)) =
             (env.var("TMUX"), env.var("TMUX_PANE"), env.find_bin("tmux"))

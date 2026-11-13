@@ -41,21 +41,34 @@ safesh only sees what its own shell runs. A Python script deleting files, or `ma
 safesh install claude          # Claude Code: ~/.claude/settings.json
 safesh install codex           # Codex: $CODEX_HOME/config.toml (then /hooks to trust)
 safesh install agy             # Antigravity: ~/.gemini/config/hooks.json
-safesh install claude-shadow   # log decisions only, next to the TS hook
 ```
 
-Add `--dry-run` to print the change without writing it. The installer won't replace a TS safesh hook; use the `-shadow` form next to it.
+Add `--dry-run` to print the change without writing it. The installer replaces an existing TS safesh hook.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `safesh hook claude\|gemini\|codex\|agy [--shadow]` | PreToolUse entry point |
+| `safesh hook claude\|gemini\|codex\|agy` | PreToolUse entry point |
 | `safesh run --id <hash>` | run an approved, cached script |
 | `safesh retry --id <id> --choice <1-5>` | approve a pending command, then run it |
 | `safesh retry-path --id <id> --choice <r\|w\|rw><1-3>[d]` | approve a pending path, then run it |
 | `safesh check '<script>'` | show what the pre-check decides |
 | `safesh install <agent>` | install the hook |
+| `safesh status` | list hooks and runs in progress, with what each is doing now |
+| `safesh log [--id P] [--session P] [--date D] [-n N] [-f]` | show recent events, or follow them |
+
+## Debugging
+
+When a command seems stuck, run `safesh status`. A hook may be waiting on an approval prompt nobody sees, or a run may be on a child exec. Then run `safesh log --id <id>` for one script, or `safesh log -f` to follow.
+
+```
+PID    KIND  AGE    ID                SESSION   NOW
+48213  hook  1m35s  3f9a1c0b7d2e4a68  a1b2c3d4  waiting for the user via tmux (1m35s)
+48377  run   12s    3f9a1c0b7d2e4a68  a1b2c3d4  exec cargo test (12s)
+```
+
+Events go to `/tmp/safesh/log/<date>.jsonl` (JSONL, readable with jq). Live status is in `/tmp/safesh/active/<pid>.json`. Logs older than 7 days are removed. `SAFESH_STATE_DIR` replaces `/tmp/safesh`.
 
 ## Config
 

@@ -841,6 +841,10 @@ pub struct ToaChannel;
 pub type Toa = ToaChannel;
 
 impl Channel for ToaChannel {
+    fn name(&self) -> &'static str {
+        "toa"
+    }
+
     /// TOA delivers answers only into its own terminals and has no signal for an open UI.
     /// So it counts only when this agent runs in a TOA terminal and the daemon answers.
     fn available(&self, env: &Env) -> bool {

@@ -1,0 +1,152 @@
+mod common;
+use common::*;
+use serde_json::Value;
+
+/// All events logged so far. Reads whatever day files exist, so it does not depend on the date.
+fn events(e: &Env) -> Vec<Value> {
+    let dir = e.state.join("log");
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return out;
+    };
+    let mut files: Vec<_> = rd.flatten().map(|f| f.path()).collect();
+    files.sort();
+    for f in files {
+        for line in std::fs::read_to_string(f).unwrap().lines() {
+            out.push(serde_json::from_str(line).expect("log line is JSON"));
+        }
+    }
+    out
+}
+
+fn find<'a>(evs: &'a [Value], ev: &str) -> Vec<&'a Value> {
+    evs.iter().filter(|v| v["ev"] == ev).collect()
+}
+
+fn active_files(e: &Env) -> Vec<std::path::PathBuf> {
+    match std::fs::read_dir(e.state.join("active")) {
+        Ok(rd) => rd.flatten().map(|f| f.path()).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn write_active(e: &Env, pid: u32, kind: &str, id: &str, step: &str) -> std::path::PathBuf {
+    let dir = e.state.join("active");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ts = "2026-01-01T00:00:00.000+00:00";
+    let p = dir.join(format!("{pid}.json"));
+    let body = serde_json::json!({
+        "pid": pid, "kind": kind, "id": id, "session": "s1", "cwd": e.proj,
+        "started": ts, "step": step, "step_at": ts,
+    });
+    std::fs::write(&p, body.to_string()).unwrap();
+    p
+}
+
+#[test]
+fn hook_and_run_are_logged() {
+    let e = Env::new();
+    let r = e.hook_run("echo hi");
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    let evs = events(&e);
+    assert_eq!(find(&evs, "hook.start").len(), 1, "{evs:?}");
+    let input = find(&evs, "hook.input");
+    assert!(input[0]["cmd"].as_str().unwrap().contains("echo hi"));
+    let dec = find(&evs, "hook.decision");
+    assert_eq!(dec[0]["decision"], "rewrite");
+    let id = dec[0]["id"].as_str().expect("decision has id");
+    assert_eq!(find(&evs, "hook.end")[0]["code"], 0);
+    assert_eq!(find(&evs, "run.start")[0]["id"], id);
+    let end = find(&evs, "run.end");
+    assert_eq!(end[0]["id"], id);
+    assert_eq!(end[0]["code"], 0);
+    assert!(active_files(&e).is_empty(), "{:?}", active_files(&e));
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_denial_is_logged() {
+    let e = Env::new();
+    let (t, _) = denied_target("safesh-e2e-trace");
+    let r = e.hook_run(&format!("x=$(echo touch); $x {t}"));
+    assert_eq!(r.code, 126, "stdout={} stderr={}", r.stdout, r.stderr);
+    let evs = events(&e);
+    let id = find(&evs, "run.start")[0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let blocked = find(&evs, "exec.blocked");
+    assert!(!blocked.is_empty(), "{evs:?}");
+    assert_eq!(blocked[0]["id"], id.as_str());
+    let end = find(&evs, "run.end");
+    assert_eq!(end[0]["code"], 126, "{evs:?}");
+    assert!(active_files(&e).is_empty(), "{:?}", active_files(&e));
+}
+
+#[test]
+fn status_empty() {
+    let e = Env::new();
+    let r = e.run_safesh(&["status"]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.stdout.contains("nothing in progress"), "{}", r.stdout);
+}
+
+#[cfg(unix)]
+#[test]
+fn status_reports_and_removes_dead_entries() {
+    let e = Env::new();
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    let f = write_active(&e, pid, "run", "dead01", "exec sleep 9");
+    let r = e.run_safesh(&["status"]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.stdout.contains("gone without finishing"), "{}", r.stdout);
+    assert!(r.stdout.contains("exec sleep 9"), "{}", r.stdout);
+    assert!(!f.exists());
+    let r2 = e.run_safesh(&["status"]);
+    assert!(r2.stdout.contains("nothing in progress"), "{}", r2.stdout);
+}
+
+#[test]
+fn status_shows_live_entry() {
+    let e = Env::new();
+    let f = write_active(&e, std::process::id(), "run", "abc123", "exec cargo test");
+    let r = e.run_safesh(&["status"]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.stdout.contains("PID"), "{}", r.stdout);
+    assert!(r.stdout.contains("abc123"), "{}", r.stdout);
+    assert!(r.stdout.contains("exec cargo test"), "{}", r.stdout);
+    assert!(f.exists());
+}
+
+#[test]
+fn log_filters_by_id() {
+    let e = Env::new();
+    assert_eq!(e.hook_run("echo one").code, 0);
+    assert_eq!(e.hook_run("echo two").code, 0);
+    let ids: Vec<String> = find(&events(&e), "hook.decision")
+        .iter()
+        .map(|v| v["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    let r = e.run_safesh(&["log", "--id", &ids[0][..6]]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.stdout.contains(&ids[0]), "{}", r.stdout);
+    assert!(!r.stdout.contains(&ids[1]), "{}", r.stdout);
+    let one = e.run_safesh(&["log", "-n", "1"]);
+    assert_eq!(one.stdout.lines().count(), 1, "{}", one.stdout);
+}
+
+#[test]
+fn log_missing_day() {
+    let e = Env::new();
+    let r = e.run_safesh(&["log", "--date", "2000-01-01"]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(
+        r.stdout.contains("no log for 2000-01-01"),
+        "{}{}",
+        r.stdout,
+        r.stderr
+    );
+}

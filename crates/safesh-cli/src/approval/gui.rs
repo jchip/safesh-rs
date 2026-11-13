@@ -14,6 +14,10 @@ use super::{Channel, Choice, Env, Prompt, body_lines, choice_from_label, numbere
 pub struct Gui;
 
 impl Channel for Gui {
+    fn name(&self) -> &'static str {
+        "gui"
+    }
+
     fn available(&self, env: &Env) -> bool {
         if env.windows {
             // Over SSH or in a service there is no desktop to show the dialog on.

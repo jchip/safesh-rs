@@ -30,6 +30,7 @@ fn rerun(
     background: bool,
     grant: impl FnOnce(&mut safesh_policy::config::Config),
 ) -> u8 {
+    crate::trace::set_context(Some(script_id), session, Some(cwd));
     let script = match cache::load(&host, script_id) {
         Ok(s) => s,
         Err(e) => return fail(&e),

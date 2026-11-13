@@ -12,7 +12,8 @@ use safesh_policy::state::pending::{
 };
 
 use crate::context::Context;
-use crate::messages;
+use crate::{messages, trace};
+use serde_json::json;
 
 pub struct PolicyGate {
     pub ctx: Arc<Context>,
@@ -100,8 +101,8 @@ fn reason_text(decision: &Decision) -> Option<String> {
     }
 }
 
-impl Gate for PolicyGate {
-    fn check_exec(&self, req: &ExecRequest<'_>) -> Result<(), String> {
+impl PolicyGate {
+    fn decide_exec(&self, req: &ExecRequest<'_>) -> Result<(), String> {
         let program: PathBuf = if req.program.is_absolute() {
             req.program.to_path_buf()
         } else {
@@ -157,11 +158,7 @@ impl Gate for PolicyGate {
         Err(self.block_command(&commands, req.cwd, &reasons))
     }
 
-    fn runs_in_engine(&self, program: &Path, cwd: &Path) -> bool {
-        self.ctx.policy.is_agent_script(program, cwd)
-    }
-
-    fn check_open(&self, path: &Path, access: Access) -> Result<(), String> {
+    fn decide_open(&self, path: &Path, access: Access) -> Result<(), String> {
         let cwd = path.parent().unwrap_or(path);
         match self.ctx.policy.check_path(path, cwd, access) {
             Decision::Allow { .. } => Ok(()),
@@ -171,5 +168,42 @@ impl Gate for PolicyGate {
                 &reason_text(&d).into_iter().collect::<Vec<_>>(),
             )),
         }
+    }
+}
+
+/// A denial ends the run right after the gate returns (see `safesh_exec::abort`), so it is
+/// logged as the end of the run here.
+fn trace_denial(ev: &str, fields: serde_json::Value, message: &str) {
+    let mut fields = fields;
+    fields["message"] = trace::preview(message).into();
+    trace::event(ev, fields);
+    trace::end(safesh_exec::DENIED_STATUS);
+}
+
+impl Gate for PolicyGate {
+    fn check_exec(&self, req: &ExecRequest<'_>) -> Result<(), String> {
+        let argv = trace::preview(&req.argv.join(" "));
+        let r = self.decide_exec(req);
+        match &r {
+            Ok(()) => {
+                trace::event("exec", json!({ "argv": argv }));
+                trace::step(format!("exec {argv}"));
+            }
+            Err(m) => trace_denial("exec.blocked", json!({ "argv": argv }), m),
+        }
+        r
+    }
+
+    fn runs_in_engine(&self, program: &Path, cwd: &Path) -> bool {
+        self.ctx.policy.is_agent_script(program, cwd)
+    }
+
+    fn check_open(&self, path: &Path, access: Access) -> Result<(), String> {
+        let r = self.decide_open(path, access);
+        if let Err(m) = &r {
+            let fields = json!({ "path": path, "access": format!("{access:?}").to_lowercase() });
+            trace_denial("open.blocked", fields, m);
+        }
+        r
     }
 }

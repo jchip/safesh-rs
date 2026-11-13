@@ -295,6 +295,10 @@ pub trait Channel {
     fn is_modal(&self) -> bool {
         true
     }
+    /// Config name, for the trace.
+    fn name(&self) -> &'static str {
+        "channel"
+    }
 }
 
 /// Approval channels by config name. `ask` is not here: it is hook output, not a channel driver.
@@ -346,12 +350,18 @@ pub fn ask_with(
         if Instant::now() >= timing.give_up_at {
             return None;
         }
+        let name = ch.name();
         let deadline = if ch.is_modal() {
             if turn.is_none() {
+                crate::trace::step(format!("waiting for the prompt queue, for {name}"));
                 turn = files::Queue::wait_turn(&env.state_dir, &prompt.id, timing.give_up_at);
             }
             if turn.is_none() {
                 // The prompt queue stayed busy. A later non-modal channel does not need it.
+                crate::trace::event(
+                    "approval.queue_busy",
+                    serde_json::json!({ "channel": name }),
+                );
                 continue;
             }
             // Modal channels share one window, counted from when the turn was won.
@@ -363,9 +373,12 @@ pub fn ask_with(
             modal_deadline = None;
             (Instant::now() + timing.show).min(timing.give_up_at)
         };
+        crate::trace::step(format!("waiting for the user via {name}"));
+        crate::trace::event("approval.ask", serde_json::json!({ "channel": name }));
         if let Some(choice) = ch.ask(env, prompt, deadline) {
             return Some(choice);
         }
+        crate::trace::event("approval.no_answer", serde_json::json!({ "channel": name }));
     }
     None
 }

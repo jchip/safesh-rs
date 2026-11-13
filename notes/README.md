@@ -22,4 +22,4 @@ The TS repo is at `~/dev/safesh`. Port sources live there under `src/core`, `src
 
 ## Status (2026-11-08)
 
-Alpha complete. The `safesh` binary runs the hook, the pre-check, the embedded bash engine with runtime gates, retry, and install for Claude, Codex and agy. 717 tests pass on macOS. The P5 shadow-mode tooling is in place. A field test with the Rust hook in charge started on 2026-11-06. Native Windows under Git Bash is in as experimental (P7): CI builds and tests it on `windows-latest`, and its known gaps are listed in the top-level README and `windows-spike-results.md`. Open items are listed in `plan.md`.
+Alpha complete. The `safesh` binary runs the hook, the pre-check, the embedded bash engine with runtime gates, retry, and install for Claude, Codex and agy. 717 tests pass on macOS. Shadow mode was removed on 2026-11-12. A field test with the Rust hook in charge started on 2026-11-06. Native Windows under Git Bash is in as experimental (P7): CI builds and tests it on `windows-latest`, and its known gaps are listed in the top-level README and `windows-spike-results.md`. Open items are listed in `plan.md`.
