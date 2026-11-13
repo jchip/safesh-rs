@@ -1451,6 +1451,7 @@ mod tests {
                 commands: vec!["cargo build".into()],
                 command: None,
             },
+            tmux: None,
         };
 
         let choice = channel.ask(&env, &prompt, Instant::now() + Duration::from_secs(5));
@@ -1528,6 +1529,7 @@ mod tests {
                 commands: vec!["ls -la".into()],
                 command: None,
             },
+            tmux: None,
         };
         let choice = with_test_env(env.clone(), || {
             channel.ask(&env, &prompt, Instant::now() + Duration::from_secs(5))
@@ -1552,6 +1554,7 @@ mod tests {
                 op,
                 command: None,
             },
+            tmux: None,
         }
     }
 

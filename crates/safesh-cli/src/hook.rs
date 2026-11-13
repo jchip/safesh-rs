@@ -231,6 +231,7 @@ fn ask_user(ctx: &Context, ask: &Ask, budget: Duration) -> Option<Choice> {
         id: ask.pending_id.clone(),
         cwd: ctx.base_cwd.to_string_lossy().into_owned(),
         request: ask.request.clone(),
+        tmux: approval::tmux_location(&env),
     };
     let timing = approval::Timing {
         show: ctx.approval.timeout,

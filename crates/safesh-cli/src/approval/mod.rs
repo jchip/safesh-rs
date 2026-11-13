@@ -52,6 +52,9 @@ pub struct Prompt {
     pub id: String,
     pub cwd: String,
     pub request: Request,
+    /// The agent's tmux pane as `session:window (name)`, so the user knows who is asking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,7 +161,16 @@ pub fn body_lines(prompt: &Prompt) -> Vec<String> {
     }
     out.push(String::new());
     out.push(format!("in {}", clip(&prompt.cwd)));
+    if let Some(t) = &prompt.tmux {
+        out.push(format!("tmux: {}", clip(t)));
+    }
     out
+}
+
+/// See `Prompt::tmux`.
+#[must_use]
+pub fn tmux_location(env: &Env) -> Option<String> {
+    tmux::location(env)
 }
 
 fn clip(s: &str) -> String {
@@ -405,6 +417,7 @@ pub fn cli_ask(
             .map(|p| p.display().to_string())
             .unwrap_or_default(),
         request,
+        tmux: tmux::location(&env),
     };
     match ask_user(channels, &env, &prompt, timing) {
         Some(c) => println!("{c:?}"),
@@ -472,6 +485,7 @@ mod order_tests {
                 commands: vec!["ls".into()],
                 command: None,
             },
+            tmux: None,
         };
         let timing = Timing {
             show: Duration::from_secs(5),

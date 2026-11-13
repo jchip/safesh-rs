@@ -219,6 +219,7 @@ mod tests {
                 op: PathOperation::Write,
                 command: Some(command.into()),
             },
+            tmux: None,
         }
     }
 
@@ -261,6 +262,16 @@ mod tests {
     }
 
     #[test]
+    fn screen_shows_tmux_location_after_cwd() {
+        let mut p = path_prompt("echo hi");
+        p.tmux = Some("work:2 (claude)".into());
+        let s = screen(&p);
+        assert_eq!(s[3], "  in /Users/me/dev/proj");
+        assert_eq!(s[4], "  tmux: work:2 (claude)");
+        assert_eq!(popup_rows(&p), printed_rows(&p) + 2);
+    }
+
+    #[test]
     fn command_screen_shows_full_command() {
         let p = Prompt {
             id: "p1".into(),
@@ -269,6 +280,7 @@ mod tests {
                 commands: vec!["node".into()],
                 command: Some("node scripts/build.js --prod".into()),
             },
+            tmux: None,
         };
         let s = screen(&p);
         assert_eq!(s[0], "  node");

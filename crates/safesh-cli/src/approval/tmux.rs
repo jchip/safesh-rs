@@ -56,6 +56,27 @@ fn popup_can_show(tmux: &Path, pane: &str) -> bool {
     })
 }
 
+/// The agent's pane as `session:window (name)`. The popup shows on whatever window the user is
+/// viewing, so this says which agent asks.
+pub fn location(env: &Env) -> Option<String> {
+    let (Some(_), Some(pane), Some(tmux)) =
+        (env.var("TMUX"), env.var("TMUX_PANE"), env.find_bin("tmux"))
+    else {
+        return None;
+    };
+    let mut cmd = Command::new(tmux);
+    cmd.args([
+        "display-message",
+        "-p",
+        "-t",
+        pane,
+        "#{session_name}:#{window_index} (#{window_name})",
+    ]);
+    let out = proc::run(cmd, Instant::now() + Duration::from_secs(2))?;
+    let out = out.trim();
+    (!out.is_empty()).then(|| out.to_string())
+}
+
 /// `display-popup` came in tmux 3.2. Versions look like `3.4`, `3.3a`, `next-3.6` or
 /// `openbsd-7.4`.
 fn has_popup(version: &str) -> bool {
@@ -132,6 +153,20 @@ mod tests {
         for v in ["3.1", "3.1c", "2.9a", "next", "", "x.y"] {
             assert!(!has_popup(v), "{v}");
         }
+    }
+
+    #[test]
+    fn location_names_session_and_window() {
+        let loc = |script: &str| location(&env(script).0);
+        assert_eq!(
+            loc("#!/bin/sh\necho 'work:2 (claude)'\n").as_deref(),
+            Some("work:2 (claude)")
+        );
+        assert_eq!(loc("#!/bin/sh\nexit 1\n"), None);
+        assert_eq!(loc("#!/bin/sh\necho\n"), None);
+        let (mut e, _d) = env("#!/bin/sh\necho 'work:2 (claude)'\n");
+        e.vars.remove("TMUX_PANE");
+        assert_eq!(location(&e), None);
     }
 
     #[test]

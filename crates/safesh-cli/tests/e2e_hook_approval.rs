@@ -14,7 +14,10 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 const FAKE_TMUX: &str = r#"#!/bin/sh
-if [ "$1" = "display-message" ]; then echo 1 3.8; exit 0; fi
+if [ "$1" = "display-message" ]; then
+  case "$*" in *session_name*) echo 'work:2 (claude)' ;; *) echo 1 3.8 ;; esac
+  exit 0
+fi
 for a in "$@"; do
   if [ "$a" = "-C" ]; then echo close >> "$FAKE_LOG"; exit 0; fi
 done
@@ -268,6 +271,7 @@ fn path_write_once_runs() {
         "{screen}"
     );
     assert!(screen.contains("command: echo outside-data > "), "{screen}");
+    assert!(screen.contains("tmux: work:2 (claude)"), "{screen}");
     assert!(!f.exists());
     let r = t.e.sh(&cmd);
     assert_eq!(r.code, 0, "{}", r.stderr);

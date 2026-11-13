@@ -357,6 +357,7 @@ mod windows_tests {
                 commands: vec![c.into()],
                 command: None,
             },
+            tmux: None,
         }
     }
 
@@ -490,6 +491,7 @@ mod tests {
                 commands: vec![c.into()],
                 command: None,
             },
+            tmux: None,
         }
     }
 
@@ -502,6 +504,7 @@ mod tests {
                 op: PathOperation::Read,
                 command: Some("cat /etc/x".into()),
             },
+            tmux: None,
         }
     }
 
