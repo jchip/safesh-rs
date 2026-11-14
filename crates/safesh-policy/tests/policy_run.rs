@@ -327,3 +327,29 @@ fn path_checked_file_tools_are_allowed_by_name() {
         assert!(p.check_run(c, &f.root).is_allow(), "{c}");
     }
 }
+
+#[test]
+fn npx_is_hard_denied_even_when_configured_allowed() {
+    let f = fx();
+    let dir = f.root.join("project");
+    let mut c = with_run(cfg(&dir), &["npx", "/usr/local/bin/npx"]);
+    c.rules = Some(vec![safesh_policy::rules::Rule {
+        pattern: vec!["npx".to_string()],
+        action: safesh_policy::rules::RuleAction::Allow,
+    }]);
+    let p = policy(&c, &dir, &f.host);
+    for target in ["npx", "/usr/local/bin/npx", "./node_modules/.bin/npx", "NPX"] {
+        assert!(
+            matches!(
+                p.check_run(target, &dir),
+                Decision::Deny {
+                    reason: Reason::Denied,
+                    ..
+                }
+            ),
+            "expected hard deny for {target}"
+        );
+        let problems = p.check_exec(&[target.to_string(), "--version".to_string()], None, &dir);
+        assert!(problems.iter().any(safesh_policy::policy::Problem::is_hard), "{problems:?}");
+    }
+}

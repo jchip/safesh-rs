@@ -287,3 +287,35 @@ fn allow_rule_that_names_the_path_covers_it() {
     let other = e.hook(&format!("'{}' --for-real", fake.display()));
     assert_ne!(other.decision(), "allow", "{}", other.stdout);
 }
+
+#[test]
+fn npx_is_hard_denied_without_approval_prompt() {
+    let e = Env::new();
+    let fake = fake_tool(&e.outside.join("bin"), "npx");
+    e.write_global_config(
+        &serde_json::json!({
+            "permissions": { "run": ["npx", fake] },
+            "rules": [{ "match": ["npx"], "action": "allow" }]
+        })
+        .to_string(),
+    );
+    for cmd in [
+        "npx --version",
+        "npx $PKG",
+        "env npx --version",
+        "CMD=npx; $CMD --version",
+        &format!("'{}' --version", fake.display()),
+    ] {
+        let h = e.hook(cmd);
+        assert_eq!(h.decision(), "deny", "{cmd}: {}", h.stdout);
+        assert!(h.reason().contains("DENIED:"), "{cmd}: {}", h.reason());
+        assert!(!h.reason().contains("retry"), "{cmd}: {}", h.reason());
+    }
+    let check = e.run_safesh(&["check", "npx --version"]);
+    assert_eq!(check.stdout.lines().last(), Some("decision: deny"), "{}", check.stdout);
+    // Runtime gate also hard-denies npx when obscured until execution.
+    let r = e.hook_run("x=$(echo npx); $x --version");
+    assert_eq!(r.code, 126, "{} {}", r.stdout, r.stderr);
+    assert!(r.stderr.contains("DENIED:"), "{}", r.stderr);
+    assert!(!r.stderr.contains("retry"), "{}", r.stderr);
+}

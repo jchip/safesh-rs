@@ -413,7 +413,11 @@ fn check(script: &str, session: Option<&str>) -> u8 {
                 for (what, p) in &ev.problems {
                     println!("problem at {what}: {p:?}");
                 }
-                println!("decision: ask");
+                if ev.problems.iter().any(|(_, p)| p.is_hard()) {
+                    println!("decision: deny");
+                } else {
+                    println!("decision: ask");
+                }
             }
             0
         }

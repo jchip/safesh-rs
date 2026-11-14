@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::Policy;
+use super::{Policy, is_hard_denied_command};
 use crate::effect::{Access, Decision};
 use crate::paths::{has_path_sep, resolve_lexical};
 use crate::rules::{self, RuleAction};
@@ -56,6 +56,7 @@ impl Policy {
                         _ => name,
                     };
                     if is_outer
+                        && !is_hard_denied_command(&target)
                         && rule == Some(RuleAction::Allow)
                         && self.allow_rule_covers(argv, &target, cwd)
                     {

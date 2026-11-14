@@ -9,7 +9,7 @@ use safesh_hooks::{
     Agent, ApprovalRequest, HookInput, Outcome, consume_approval, format_output,
     format_permission_request_allow, parse_input, write_approval,
 };
-use safesh_policy::effect::Access;
+use safesh_policy::effect::{Access, Decision, Reason};
 use safesh_policy::policy::Problem;
 use safesh_policy::state::pending::{
     PathOperation, PendingCommand, PendingKind, PendingPathRequest, delete_pending,
@@ -359,16 +359,23 @@ impl Blocked {
     }
 }
 
+fn hard_reason(p: &Problem) -> &str {
+    match p {
+        Problem::Run {
+            decision: Decision::Deny { reason: Reason::Denied, .. },
+            ..
+        }
+        | Problem::Path { .. } => "on a deny list",
+        Problem::Run { .. } => "not found or on a deny list",
+        Problem::Rule { .. } => "denied by a rule",
+        Problem::Ask(r) => r.as_str(),
+    }
+}
+
 /// Writes a pending approval and returns the deny text.
 fn block(ctx: &Context, ev: &Evaluation, id: &str, input: &HookInput) -> Blocked {
     if let Some((what, p)) = ev.problems.iter().find(|(_, p)| p.is_hard()) {
-        let why = match p {
-            Problem::Run { .. } => "not found or on a deny list",
-            Problem::Path { .. } => "on a deny list",
-            Problem::Rule { .. } => "denied by a rule",
-            Problem::Ask(r) => r.as_str(),
-        };
-        return Blocked::text(messages::denied(what, &[why.to_string()]));
+        return Blocked::text(messages::denied(what, &[hard_reason(p).to_string()]));
     }
     let cwd = ctx.base_cwd.to_string_lossy().into_owned();
     let paths_only = ev

@@ -178,6 +178,16 @@ pub struct Policy {
     session_id: Option<String>,
 }
 
+/// Commands hard-coded to deny unconditionally.
+const HARD_DENIED_COMMANDS: &[&str] = &["npx"];
+
+pub(crate) fn is_hard_denied_command(command: &str) -> bool {
+    let name = command_name(command);
+    HARD_DENIED_COMMANDS
+        .iter()
+        .any(|d| name.eq_ignore_ascii_case(d))
+}
+
 impl Policy {
     /// `cwd` is the invocation's base cwd. It fills `${CWD}` and anchors relative list entries.
     pub fn new(
@@ -304,6 +314,17 @@ impl Policy {
     /// is allowed when it is the program an allowed name resolves to through PATH.
     #[must_use]
     pub fn check_run(&self, command: &str, cwd: &Path) -> Decision {
+        if is_hard_denied_command(command) {
+            let resolved = if has_path_sep(command) {
+                PathBuf::from(resolve_lexical(&cwd.to_string_lossy(), command))
+            } else {
+                PathBuf::from(command)
+            };
+            return Decision::Deny {
+                resolved,
+                reason: Reason::Denied,
+            };
+        }
         let allow = |p: &str| Decision::Allow { resolved: p.into() };
         let ask = |p: &str| Decision::Ask {
             resolved: p.into(),
