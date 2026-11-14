@@ -10,8 +10,26 @@ use brush_core::builtins::{ContentOptions, ContentType, Invocation, ParseArgs, U
 use brush_core::commands::{ExecutionContext, ShellForCommand, SimpleCommand};
 use brush_core::processes::ProcessWaitResult;
 use brush_core::results::{ExecutionExitCode, ExecutionResult, ExecutionSpawnResult};
+#[cfg(unix)]
 use brush_core::traps::TrapSignal;
 use brush_core::{CommandArg, Error};
+
+#[cfg(unix)]
+type TimeoutSignal = TrapSignal;
+
+#[cfg(not(unix))]
+#[derive(Debug, Clone, Copy)]
+struct TimeoutSignal {
+    name: &'static str,
+    number: i32,
+}
+
+#[cfg(not(unix))]
+impl std::fmt::Display for TimeoutSignal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name)
+    }
+}
 
 #[derive(Debug)]
 #[allow(clippy::struct_excessive_bools)]
@@ -20,7 +38,7 @@ pub struct TimeoutCommand {
     #[allow(dead_code)]
     foreground: bool,
     verbose: bool,
-    signal: TrapSignal,
+    signal: TimeoutSignal,
     kill_after: Option<Duration>,
     duration: Duration,
     command_and_args: Vec<String>,
@@ -29,16 +47,81 @@ pub struct TimeoutCommand {
     error: Option<String>,
 }
 
-fn default_signal() -> TrapSignal {
+#[cfg(unix)]
+fn default_signal() -> TimeoutSignal {
     "TERM"
         .parse::<TrapSignal>()
         .expect("TERM is a valid signal")
 }
 
-fn kill_signal() -> TrapSignal {
+#[cfg(unix)]
+fn kill_signal() -> TimeoutSignal {
     "KILL"
         .parse::<TrapSignal>()
         .expect("KILL is a valid signal")
+}
+
+#[cfg(unix)]
+fn parse_signal(s: &str) -> Result<TimeoutSignal, String> {
+    s.parse::<TrapSignal>()
+        .map_err(|_| format!("invalid signal '{s}'"))
+}
+
+#[cfg(unix)]
+fn signal_number(sig: TimeoutSignal) -> i32 {
+    i32::try_from(sig).unwrap_or(15)
+}
+
+#[cfg(not(unix))]
+const fn default_signal() -> TimeoutSignal {
+    TimeoutSignal {
+        name: "SIGTERM",
+        number: 15,
+    }
+}
+
+#[cfg(not(unix))]
+const fn kill_signal() -> TimeoutSignal {
+    TimeoutSignal {
+        name: "SIGKILL",
+        number: 9,
+    }
+}
+
+#[cfg(not(unix))]
+fn parse_signal(s: &str) -> Result<TimeoutSignal, String> {
+    let upper = s.to_ascii_uppercase();
+    let trimmed = upper.strip_prefix("SIG").unwrap_or(&upper);
+    match trimmed {
+        "HUP" | "1" => Ok(TimeoutSignal {
+            name: "SIGHUP",
+            number: 1,
+        }),
+        "INT" | "2" => Ok(TimeoutSignal {
+            name: "SIGINT",
+            number: 2,
+        }),
+        "QUIT" | "3" => Ok(TimeoutSignal {
+            name: "SIGQUIT",
+            number: 3,
+        }),
+        "ABRT" | "6" => Ok(TimeoutSignal {
+            name: "SIGABRT",
+            number: 6,
+        }),
+        "KILL" | "9" => Ok(kill_signal()),
+        "ALRM" | "14" => Ok(TimeoutSignal {
+            name: "SIGALRM",
+            number: 14,
+        }),
+        "TERM" | "15" => Ok(default_signal()),
+        _ => Err(format!("invalid signal '{s}'")),
+    }
+}
+
+#[cfg(not(unix))]
+const fn signal_number(sig: TimeoutSignal) -> i32 {
+    sig.number
 }
 
 impl TimeoutCommand {
@@ -82,14 +165,9 @@ fn parse_duration(s: &str) -> Result<Duration, String> {
     Ok(Duration::from_secs_f64(val * multiplier))
 }
 
-fn parse_signal(s: &str) -> Result<TrapSignal, String> {
-    s.parse::<TrapSignal>()
-        .map_err(|_| format!("invalid signal '{s}'"))
-}
-
 #[cfg(unix)]
 #[allow(clippy::similar_names)]
-fn kill_child(pid: i32, pgid: Option<i32>, sig: TrapSignal) {
+fn kill_child(pid: i32, pgid: Option<i32>, sig: TimeoutSignal) {
     if let Some(pgid) = pgid {
         let shell_pgid = rustix::process::getpgrp().as_raw_nonzero().get();
         if pgid > 0 && pgid != shell_pgid {
@@ -100,7 +178,7 @@ fn kill_child(pid: i32, pgid: Option<i32>, sig: TrapSignal) {
 }
 
 #[cfg(windows)]
-fn kill_child(pid: i32, _pgid: Option<i32>, _sig: TrapSignal) {
+fn kill_child(pid: i32, _pgid: Option<i32>, _sig: TimeoutSignal) {
     if pid > 0 {
         safesh_policy::compat::terminate_and_wait(pid.cast_unsigned(), 124, 2000);
     }
@@ -375,7 +453,7 @@ impl<SE: brush_core::ShellExtensions> brush_core::builtins::Builtin<SE> for Time
                         }
 
                         if self.preserve_status {
-                            let sig_num = i32::try_from(self.signal).unwrap_or(15);
+                            let sig_num = signal_number(self.signal);
                             #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                             Ok(ExecutionResult::from(ExecutionExitCode::from(
                                 (128 + sig_num) as u8,
@@ -398,7 +476,7 @@ impl<SE: brush_core::ShellExtensions> brush_core::builtins::Builtin<SE> for Time
                     }
                     Err(_) => {
                         if self.preserve_status {
-                            let sig_num = i32::try_from(self.signal).unwrap_or(15);
+                            let sig_num = signal_number(self.signal);
                             #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                             Ok(ExecutionResult::from(ExecutionExitCode::from(
                                 (128 + sig_num) as u8,
