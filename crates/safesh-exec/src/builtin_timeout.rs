@@ -102,7 +102,7 @@ fn kill_child(pid: i32, pgid: Option<i32>, sig: TrapSignal) {
 #[cfg(windows)]
 fn kill_child(pid: i32, _pgid: Option<i32>, _sig: TrapSignal) {
     if pid > 0 {
-        safesh_policy::compat::terminate_and_wait(pid as u32, 124, 2000);
+        safesh_policy::compat::terminate_and_wait(pid.cast_unsigned(), 124, 2000);
     }
 }
 

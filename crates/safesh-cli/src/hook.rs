@@ -362,7 +362,11 @@ impl Blocked {
 fn hard_reason(p: &Problem) -> &str {
     match p {
         Problem::Run {
-            decision: Decision::Deny { reason: Reason::Denied, .. },
+            decision:
+                Decision::Deny {
+                    reason: Reason::Denied,
+                    ..
+                },
             ..
         }
         | Problem::Path { .. } => "on a deny list",

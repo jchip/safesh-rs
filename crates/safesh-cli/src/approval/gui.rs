@@ -704,11 +704,16 @@ mod tests {
         assert!(!Socket::Unix(p.clone()).accepts());
         let _l = std::os::unix::net::UnixListener::bind(&p).unwrap();
         assert!(Socket::Unix(p).accepts());
+        let dead = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        assert!(!Socket::Tcp("127.0.0.1".into(), dead).accepts());
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
         assert!(Socket::Tcp("127.0.0.1".into(), port).accepts());
         drop(l);
-        assert!(!Socket::Tcp("127.0.0.1".into(), port).accepts());
     }
 
     #[test]

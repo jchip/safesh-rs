@@ -192,6 +192,7 @@ fn no_echo_without_debug() {
 }
 
 /// The script id in a hook rewrite: `... run --id <id> ...`.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn rewrite_id(command: &str) -> String {
     let i = command.find("--id ").expect("no --id") + 5;
     command[i..].split_whitespace().next().unwrap().to_string()

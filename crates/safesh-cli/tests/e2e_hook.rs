@@ -312,7 +312,12 @@ fn npx_is_hard_denied_without_approval_prompt() {
         assert!(!h.reason().contains("retry"), "{cmd}: {}", h.reason());
     }
     let check = e.run_safesh(&["check", "npx --version"]);
-    assert_eq!(check.stdout.lines().last(), Some("decision: deny"), "{}", check.stdout);
+    assert_eq!(
+        check.stdout.lines().last(),
+        Some("decision: deny"),
+        "{}",
+        check.stdout
+    );
     // Runtime gate also hard-denies npx when obscured until execution.
     let r = e.hook_run("x=$(echo npx); $x --version");
     assert_eq!(r.code, 126, "{} {}", r.stdout, r.stderr);

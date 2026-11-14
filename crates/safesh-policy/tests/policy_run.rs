@@ -338,7 +338,12 @@ fn npx_is_hard_denied_even_when_configured_allowed() {
         action: safesh_policy::rules::RuleAction::Allow,
     }]);
     let p = policy(&c, &dir, &f.host);
-    for target in ["npx", "/usr/local/bin/npx", "./node_modules/.bin/npx", "NPX"] {
+    for target in [
+        "npx",
+        "/usr/local/bin/npx",
+        "./node_modules/.bin/npx",
+        "NPX",
+    ] {
         assert!(
             matches!(
                 p.check_run(target, &dir),
@@ -350,6 +355,9 @@ fn npx_is_hard_denied_even_when_configured_allowed() {
             "expected hard deny for {target}"
         );
         let problems = p.check_exec(&[target.to_string(), "--version".to_string()], None, &dir);
-        assert!(problems.iter().any(safesh_policy::policy::Problem::is_hard), "{problems:?}");
+        assert!(
+            problems.iter().any(safesh_policy::policy::Problem::is_hard),
+            "{problems:?}"
+        );
     }
 }
